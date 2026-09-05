@@ -141,12 +141,12 @@ const visualToggle = document.getElementById('visualToggle');
 const showVisuals = () => visualToggle.checked;
 
 const PRESETS = [
-  "How much did we spend on vendor payouts last month?",
-  "How does that compare to the month before?",
+  "How much did we spend this month?",
+  "Who are our top 5 vendors this month?",
+  "How much did we spend on Swiggy this month?",
   "Which transactions are still unreconciled?",
-  "How much did we pay Blue Dart in August 2026?",
-  "Who are our top 5 vendors by total spend?",
-  "How much did we spend on Selection?",
+  "Which bank do we move the most money out of?",
+  "Anything unusual about our largest payments this month?",
   "What is the GST component of our March 2026 invoices?",
 ];
 
@@ -364,7 +364,7 @@ async function fabricationDemo() {
   try {
     const r = await fetch('/demo/fabrication', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({question: 'How much did we spend last month?'})
+      body: JSON.stringify({question: 'How much did we spend this month?'})
     });
     const a = await r.json();
     a.question = 'Demo: a draft answer with a number no query produced';

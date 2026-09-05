@@ -295,7 +295,7 @@ class Engine:
 
     # ------------------------------------------------------------ judge demo
 
-    def fabrication_demo(self, question: str = "How much did we spend last month?") -> Answer:
+    def fabrication_demo(self, question: str = "How much did we spend this month?") -> Answer:
         """Run the validator against a deliberately doctored answer, offline."""
         period = resolve_period(question, self.today) or resolve_period("last month", self.today)
         result = REGISTRY["spend_total"](Ctx(self.cx), period=period)
@@ -343,7 +343,25 @@ def _selects_all(q: str) -> bool:
     return ql in {"all", "all of them", "all options", "all matches", "everyone", "every option", "every match"}
 
 def _sources(result, db_label: str, model: str, plan_source: str) -> dict:
-    """Provenance for the answer: where the numbers came from and who wrote the sentence."""
+    """Provenance for the answer: where the numbers came from and who wrote the sentence.
+
+    Key names here are the contract with renderSources() in ui/index.html -- if one is
+    dropped the panel renders `undefined`, or `NaN` for the numeric ones.
+    """
     tables = sorted({t for e in result.evidence for t in re.findall(r"(?:FROM|JOIN)\s+`?([a-z_]+)`?", e.sql or "")})
-    return {"database": db_label, "tables": tables, "queries": len(result.evidence),
-            "narration": model, "planner": plan_source}
+    period = (result.period or {}).get("label") or "none"
+    # Rows the breakdown table is built from, plus rows behind each scalar value.
+    rows_returned = len(result.rows) + sum(int(e.row_count or 0) for e in result.evidence)
+    return {
+        "database": db_label,
+        "tables": tables,
+        "queries": len(result.evidence),
+        "evidence_values": len(result.evidence),
+        "rows_returned": rows_returned,
+        "period": period,
+        "interpreted_by": "rules" if plan_source != "llm" else "model",
+        "narrated_by": model or "template",
+        # kept for any client reading the older names
+        "narration": model,
+        "planner": plan_source,
+    }
