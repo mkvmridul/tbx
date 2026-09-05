@@ -158,10 +158,6 @@ is measured from `MAX(txn_date)`, and the coverage window is printed in the UI h
 | Question | What it does |
 |---|---|
 | "How much did we spend on logistics in November 2024?" | *No data for November 2024. This dataset covers 2025-01-01 to 2026-09-05, so there are no transactions in that period.* |
-<img width="1130" height="570" alt="image" src="https://github.com/user-attachments/assets/3a296a96-b7e9-4c30-8473-a27d5276eecd" />
-<img width="1130" height="336" alt="image" src="https://github.com/user-attachments/assets/5620d4f7-0a62-43ef-aace-22963e4b85b9" />
-
-
 | "How much did we pay Acme Corporation last quarter?" | *No counterparty matching "Acme Corporation" appears in the data.* |
 | "How much did we spend on Selection?" | *"Selection" matches 5 different counterparties… Which one did you mean?* |
 | "What is the GST component of our March 2026 invoices?" | *The data has no tax breakdown. It holds bank transactions only, with no invoice or line-item detail.* |
