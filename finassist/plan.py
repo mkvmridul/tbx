@@ -305,11 +305,22 @@ def plan_by_llm(question: str, history: list[str], cfg: dict | None = None) -> P
     try:
         from openai import OpenAI
         client = OpenAI(api_key=key, base_url=base) if base else OpenAI(api_key=key)
-        r = client.chat.completions.create(
-            model=model, temperature=0, max_tokens=200,
-            response_format={"type": "json_object"},
-            messages=[{"role": "user", "content": prompt}])
-        raw = json.loads(r.choices[0].message.content or "{}")
+        msgs = [{"role": "user", "content": prompt}]
+        try:
+            r = client.chat.completions.create(
+                model=model, temperature=0, max_tokens=400,
+                response_format={"type": "json_object"}, messages=msgs)
+        except Exception:
+            # Some OpenAI-compatible endpoints reject response_format; the prompt already
+            # demands JSON, so retry plain and extract the first object from the text.
+            r = client.chat.completions.create(
+                model=model, temperature=0, max_tokens=400, messages=msgs)
+        content = r.choices[0].message.content or ""
+        try:
+            raw = json.loads(content)
+        except ValueError:
+            m = re.search(r"\{.*\}", content, re.S)
+            raw = json.loads(m.group(0)) if m else {}
     except Exception:
         return None
 
@@ -323,8 +334,10 @@ def plan_by_llm(question: str, history: list[str], cfg: dict | None = None) -> P
         return None                                   # unknown intent -> caller keeps the rules plan
 
     slots, vendor = {}, None
+    # Some models nest the slots ({"intent": ..., "slots": {...}}); accept both shapes.
+    src = raw.get("slots") if isinstance(raw.get("slots"), dict) else raw
     for k in SLOTS[intent]:
-        v = raw.get(k)
+        v = src.get(k, raw.get(k))
         if v in (None, "", "null"):
             continue
         if k == "counterparty":
@@ -338,26 +351,27 @@ def plan_by_llm(question: str, history: list[str], cfg: dict | None = None) -> P
             slots["period_text"] = str(v)
         else:
             slots[k] = str(v)
-    return Plan(intent, slots, "llm", vendor_text=vendor or raw.get("counterparty"))
+    return Plan(intent, slots, "llm", vendor_text=vendor or src.get("counterparty") or raw.get("counterparty"))
 
 
 def make_plan(question: str, history: list[str] | None = None, cfg: dict | None = None,
-              use_llm: bool = True, force_llm: bool = False) -> Plan:
+              use_llm: bool = True) -> Plan:
     """Rules first; the model is asked only when the rules are unsure or see a follow-up.
 
-    `force_llm` is the retry path: the rules produced an answer the engine could not use,
-    so the model gets a second opinion even though the rules felt confident.
-    """
+    With LLM_PLANNER_FIRST=1 the order flips: refusal patterns and reference tokens stay
+    regex (precise and free), then the model classifies; rules are the offline fallback."""
     rules = plan_by_rules(question)
     if rules.intent == "unsupported":
         return rules
-    looks_like_follow_up = (
-        len((question or "").split()) <= 8
-        and not rules.vendor_text
-        and bool(re.search(r"\b(that|it|them|those|same|again|also|and|what about)\b",
-                           question or "", re.I))
-    )
-    if not use_llm or (not force_llm and rules.confidence == "high" and not looks_like_follow_up):
+    if use_llm and os.environ.get("LLM_PLANNER_FIRST", "").strip().lower() in ("1", "true", "yes"):
+        if rules.intent == "transaction_search" and rules.slots.get("reference"):
+            return rules                              # a UTR/reference token is a regex job
+        llm = plan_by_llm(question, history or [], cfg)
+        if llm is not None:
+            return llm                                # includes follow_up / unsupported
+        return rules                                  # model unreachable -> rules
+    looks_like_follow_up = len((question or "").split()) <= 8 and not rules.vendor_text
+    if not use_llm or (rules.confidence == "high" and not looks_like_follow_up):
         return rules
     llm = plan_by_llm(question, history or [], cfg)
     if llm is None:

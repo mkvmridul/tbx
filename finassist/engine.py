@@ -164,6 +164,15 @@ class Engine:
             # Continuing the previous intent is recoverable -- the intent chip shows what was
             # answered -- whereas silently switching topic is not.
             p = planner.Plan(session.intent, p.slots, "inherited", vendor_text=p.vendor_text)
+        elif p.confidence == "low" and p.source == "rules" and not _about_money(question):
+            # First turn, rules unsure, no model answer to lean on, and the question does not
+            # even mention money. Answering a whole-company total to "what is the weather" is
+            # a wrong answer dressed as a right one. Say what we can do instead. (A vague but
+            # money-shaped question -- "how much did we spend on vendor payouts" -- still gets
+            # the spend_total default, which is the right reading of it.)
+            p = planner.Plan("unsupported", source="rules", reason=(
+                "I can answer questions about spend, vendors, categories, reconciliation and "
+                "unusual payments — I didn't recognise that one."))
 
         # --- guard: the data cannot answer this at all -----------------------
         if p.intent == "unsupported":
@@ -312,28 +321,14 @@ class Engine:
         }
 
 
-_TABLE_RE = re.compile(r"\b(?:FROM|JOIN)\s+`?([a-z_][a-z0-9_]*)`?", re.I)
+_MONEY_WORDS = ("spend", "spent", "pay", "paid", "payment", "payout", "money", "amount",
+                "total", "cost", "rs", "rupee", "transaction", "debit", "credit", "outflow",
+                "inflow", "expense", "vendor", "supplier", "balance", "how much")
 
 
-def _sources(result, db_label: str, narrator: str, plan_source: str) -> dict:
-    """Which tables and queries the shown figures actually came from."""
-    tables, queries = set(), 0
-    for e in result.evidence:
-        sql = (e.sql or "").strip()
-        if not sql or sql.startswith("--"):
-            continue          # a value computed in Python from earlier evidence
-        queries += 1
-        tables.update(t.lower() for t in _TABLE_RE.findall(sql))
-    return {
-        "database": db_label,
-        "tables": sorted(tables),
-        "queries": queries,
-        "evidence_values": len(result.evidence),
-        "rows_returned": len(result.rows),
-        "period": (result.period or {}).get("label") or "whole dataset",
-        "interpreted_by": "language model" if plan_source == "llm" else "keyword rules",
-        "narrated_by": narrator,
-    }
+def _about_money(q: str) -> bool:
+    ql = (q or "").lower()
+    return any(w in ql for w in _MONEY_WORDS)
 
 
 def _is_follow_up(q: str) -> bool:
