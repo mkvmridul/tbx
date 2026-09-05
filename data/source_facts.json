@@ -1,0 +1,46 @@
+{
+  "source": "mysql://tiby@10.20.16.135:29047/tiby_hackathon",
+  "collected_at": "2026-09-05 20:00",
+  "facts": {
+    "transactions": {
+      "value": 10000000,
+      "sql": "SELECT COUNT(*) FROM `transaction`",
+      "seconds": 32.0
+    },
+    "accounts": {
+      "value": 5000,
+      "sql": "SELECT COUNT(*) FROM account",
+      "seconds": 0.0
+    },
+    "banks": {
+      "value": 29,
+      "sql": "SELECT COUNT(*) FROM bank",
+      "seconds": 0.0
+    },
+    "entities": {
+      "value": 1,
+      "sql": "SELECT COUNT(DISTINCT entity_id) FROM account",
+      "seconds": 0.1
+    },
+    "first_txn": {
+      "value": "2024-01-01",
+      "sql": "SELECT MIN(transaction_date) FROM `transaction`",
+      "seconds": 0.0
+    },
+    "last_txn": {
+      "value": "2026-08-31",
+      "sql": "SELECT MAX(transaction_date) FROM `transaction`",
+      "seconds": 0.0
+    },
+    "debits": {
+      "value": 6299608,
+      "sql": "SELECT COUNT(*) FROM `transaction` WHERE transaction_type='debit'",
+      "seconds": 20.7
+    },
+    "credits": {
+      "value": 3700392,
+      "sql": "SELECT COUNT(*) FROM `transaction` WHERE transaction_type='credit'",
+      "seconds": 11.7
+    }
+  }
+}

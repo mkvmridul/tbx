@@ -22,6 +22,7 @@ from dataclasses import dataclass, field, asdict
 
 from finassist import db as _db
 from finassist import plan as planner
+from finassist import facts as _facts
 from finassist.intents import REGISTRY, Ctx, Result
 from finassist.narrate import narrate, demo_fabrication
 from finassist.resolve import (Period, anchor, coverage, previous_period,
@@ -94,6 +95,7 @@ class Engine:
         self._check_enriched()
         self.today = anchor(self.cx)
         self.cov_start, self.cov_end = coverage(self.cx)
+        self.loaded = self.cx.execute("SELECT COUNT(*) FROM transaction_enriched").fetchone()[0]
 
     def _check_enriched(self):
         t = {r[0] for r in self.cx.execute(
@@ -147,6 +149,15 @@ class Engine:
         llm_calls = 0
 
         select_all = bool(session.pending_candidates and _selects_all(question))
+        # Whole-dataset facts answered from the SOURCE database's own numbers (cached; see facts.py).
+        if fact := _facts.answer(question, self.loaded):
+            a = Answer(question=question, status="ok", intent="source_fact", answer=fact["answer"],
+                       evidence=fact["evidence"], notes=[fact["note"]], source="deterministic",
+                       model="source-db facts", plan_source="facts", confidence="high",
+                       elapsed_ms=int((time.perf_counter() - t0) * 1000))
+            session.remember(question, a, None, None)
+            return a
+
         p = planner.make_plan(question, session.history, self.cfg, use_llm=self.use_llm,
                               force_llm=force_llm)
         if select_all:
