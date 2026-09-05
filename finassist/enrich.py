@@ -12,16 +12,16 @@ Doing it here rather than at query time is the whole design. After this runs, "h
 did we pay Blue Dart last month" is an ordinary indexed GROUP BY, so the language model
 never has to read a bank narration string and never has to do arithmetic.
 
-    python -m finassist.enrich data/finance.sqlite
+    python -m finassist.enrich
 """
 from __future__ import annotations
 
 import math
-import sqlite3
 import statistics
 import sys
 from collections import defaultdict
 
+from finassist import db as _db
 from finassist.rails import parse, canon_key, merge_keys
 
 # Robust z-score constants. MAD (median absolute deviation) is used instead of the standard
@@ -43,39 +43,39 @@ DROP TABLE IF EXISTS transaction_enriched;
 DROP TABLE IF EXISTS counterparty;
 
 CREATE TABLE counterparty (
-    counterparty_id   TEXT PRIMARY KEY,
-    canonical_name    TEXT NOT NULL,
-    canon_key         TEXT NOT NULL,
-    kind              TEXT NOT NULL,          -- business | individual | unknown
-    category          TEXT,
-    aliases           TEXT NOT NULL,          -- '|'-separated spellings actually seen
-    txn_count         INTEGER NOT NULL,
-    total_debit       REAL NOT NULL,
-    total_credit      REAL NOT NULL,
-    first_seen        TEXT,
-    last_seen         TEXT
-);
+    counterparty_id   VARCHAR(16)   PRIMARY KEY,
+    canonical_name    VARCHAR(255)  NOT NULL,
+    canon_key         VARCHAR(255)  NOT NULL,
+    kind              VARCHAR(20)   NOT NULL,          -- business | individual | unknown
+    category          VARCHAR(64)   NULL,
+    aliases           TEXT          NOT NULL,          -- '|'-separated spellings actually seen
+    txn_count         INT           NOT NULL,
+    total_debit       DECIMAL(18,2) NOT NULL,
+    total_credit      DECIMAL(18,2) NOT NULL,
+    first_seen        VARCHAR(10)   NULL,
+    last_seen         VARCHAR(10)   NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE transaction_enriched (
-    transaction_id    TEXT PRIMARY KEY,
-    account_id        TEXT NOT NULL,
-    txn_date          TEXT NOT NULL,          -- 'YYYY-MM-DD', for cheap date filtering
-    txn_month         TEXT NOT NULL,          -- 'YYYY-MM'
-    transaction_type  TEXT NOT NULL,
-    amount            REAL NOT NULL,
-    signed_amount     REAL NOT NULL,          -- debit negative, credit positive
-    rail              TEXT NOT NULL,
-    counterparty_id   TEXT,
-    counterparty_raw  TEXT,
-    location          TEXT,
-    category          TEXT,
-    external_ref      TEXT,
-    loan_ref          TEXT,
-    recon_status      TEXT NOT NULL,          -- matched_pair|matched_ref|unmatched|not_applicable
-    recon_match_id    TEXT,
-    anomaly_z         REAL,
-    is_anomaly        INTEGER NOT NULL DEFAULT 0
-);
+    transaction_id    VARCHAR(36)   PRIMARY KEY,
+    account_id        VARCHAR(36)   NOT NULL,
+    txn_date          VARCHAR(10)   NOT NULL,          -- 'YYYY-MM-DD', for cheap date filtering
+    txn_month         VARCHAR(7)    NOT NULL,          -- 'YYYY-MM'
+    transaction_type  VARCHAR(10)   NOT NULL,
+    amount            DECIMAL(15,2) NOT NULL,
+    signed_amount     DECIMAL(15,2) NOT NULL,          -- debit negative, credit positive
+    rail              VARCHAR(32)   NOT NULL,
+    counterparty_id   VARCHAR(16)   NULL,
+    counterparty_raw  VARCHAR(255)  NULL,
+    location          VARCHAR(255)  NULL,
+    category          VARCHAR(64)   NULL,
+    external_ref      VARCHAR(64)   NULL,
+    loan_ref          VARCHAR(64)   NULL,
+    recon_status      VARCHAR(24)   NOT NULL,          -- matched_pair|matched_ref|unmatched|not_applicable
+    recon_match_id    VARCHAR(36)   NULL,
+    anomaly_z         DECIMAL(8,3)  NULL,
+    is_anomaly        TINYINT       NOT NULL DEFAULT 0
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 """
 
 INDEXES = """
@@ -134,15 +134,21 @@ def classify_kind(name: str, aliases: set[str]) -> str:
     return "business" if len(up.split()) > 3 else "unknown"
 
 
-def build(db_path: str, verbose: bool = True) -> dict:
-    cx = sqlite3.connect(db_path)
-    cx.row_factory = sqlite3.Row
-    cur = cx.cursor()
+def _date10(v):
+    """Coerce a transaction_date (datetime from MySQL, str otherwise) to 'YYYY-MM-DD'."""
+    return v.strftime("%Y-%m-%d") if hasattr(v, "strftime") else str(v)[:10]
 
-    rows = cur.execute("""
+
+def _date7(v):
+    return v.strftime("%Y-%m") if hasattr(v, "strftime") else str(v)[:7]
+
+
+def build(verbose: bool = True) -> dict:
+    cx = _db.connect()
+    rows = cx.execute("""
         SELECT transaction_id, account_id, transaction_date, transaction_type,
                description, transaction_amount, transaction_reference_id, utr_number
-        FROM "transaction"
+        FROM `transaction`
     """).fetchall()
     if verbose:
         print(f"  read {len(rows):,} transactions")
@@ -177,7 +183,7 @@ def build(db_path: str, verbose: bool = True) -> dict:
                   if x["row"]["transaction_type"] == "debit")
         cre = sum(float(x["row"]["transaction_amount"]) for x in blob["rows"]
                   if x["row"]["transaction_type"] == "credit")
-        dates = sorted(x["row"]["transaction_date"][:10] for x in blob["rows"])
+        dates = sorted(_date10(x["row"]["transaction_date"]) for x in blob["rows"])
         cp_rows.append((cid, canonical, key, classify_kind(canonical, aliases),
                         categorise(canonical), " | ".join(sorted(aliases)),
                         len(blob["rows"]), round(deb, 2), round(cre, 2), dates[0], dates[-1]))
@@ -238,8 +244,8 @@ def build(db_path: str, verbose: bool = True) -> dict:
         stats[key] = (med, sigma)
 
     # ---- write ---------------------------------------------------------------
-    cur.executescript(DDL)
-    cur.executemany("INSERT INTO counterparty VALUES (?,?,?,?,?,?,?,?,?,?,?)", cp_rows)
+    cx.executescript(DDL)
+    cx.executemany("INSERT INTO counterparty VALUES (?,?,?,?,?,?,?,?,?,?,?)", cp_rows)
 
     out, n_anom = [], 0
     for rec in parsed:
@@ -264,15 +270,19 @@ def build(db_path: str, verbose: bool = True) -> dict:
         anom = 1 if (z is not None and abs(z) > ANOMALY_Z) else 0
         n_anom += anom
 
-        out.append((r["transaction_id"], r["account_id"], r["transaction_date"][:10],
-                    r["transaction_date"][:7], r["transaction_type"], amt, signed,
+        out.append((r["transaction_id"], r["account_id"], _date10(r["transaction_date"]),
+                    _date7(r["transaction_date"]), r["transaction_type"], amt, signed,
                     p.rail, cid, p.counterparty_raw, p.location,
                     categorise(p.counterparty_raw), p.external_ref, p.loan_ref,
                     status, match, z, anom))
 
-    cur.executemany(
-        "INSERT INTO transaction_enriched VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", out)
-    cur.executescript(INDEXES)
+    # MySQL's max_allowed_packet caps executemany batch size; chunk to be safe.
+    B = 5000
+    for i in range(0, len(out), B):
+        cx.executemany(
+            "INSERT INTO transaction_enriched VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            out[i:i + B])
+    cx.executescript(INDEXES)
     cx.commit()
 
     summary = {
@@ -291,8 +301,7 @@ def build(db_path: str, verbose: bool = True) -> dict:
 
 
 if __name__ == "__main__":
-    path = sys.argv[1] if len(sys.argv) > 1 else "data/finance.sqlite"
-    print(f"enriching {path} ...")
-    s = build(path)
+    print(f"enriching {_db.dsn_label()} ...")
+    s = build()
     for k, v in s.items():
         print(f"  {k:<18} {v:>10,}")

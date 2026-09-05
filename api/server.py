@@ -35,9 +35,10 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from finassist.engine import Engine, Session   # noqa: E402
+from finassist import db as _db                 # noqa: E402  (loads .env on import)
 
-DB = os.environ.get("FINASSIST_DB", str(_ROOT / "data" / "finance.sqlite"))
-PORT = int(os.environ.get("PORT", "8720"))
+PORT = int(os.environ.get("FINASSIST_PORT", os.environ.get("PORT", "8720")))
+HOST = os.environ.get("FINASSIST_HOST", "0.0.0.0")
 USE_LLM = os.environ.get("FINASSIST_LLM", "auto") != "off"
 
 _engine: Engine | None = None
@@ -52,7 +53,7 @@ _lock = threading.Lock()
 def engine() -> Engine:
     global _engine
     if _engine is None:
-        _engine = Engine(DB, use_llm=USE_LLM)
+        _engine = Engine(use_llm=USE_LLM)
     return _engine
 
 
@@ -197,7 +198,7 @@ def main():
     print(f"  coverage    {st['coverage_start']} to {st['coverage_end']}  (data clock {st['data_clock']})")
     print(f"  model       {'enabled' if (os.environ.get('LLM_API_KEY') or os.environ.get('OPENAI_API_KEY')) else 'not configured — deterministic answers only'}")
     print(f"\n  ->  http://localhost:{PORT}\n")
-    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
 
 
 if __name__ == "__main__":

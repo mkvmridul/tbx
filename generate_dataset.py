@@ -20,7 +20,7 @@ Usage:
     python3 generate_dataset.py --dirty              # inject malformed rows
 """
 
-import argparse, base64, csv, hashlib, os, random, sqlite3, sys
+import argparse, base64, csv, hashlib, os, random, sys
 from collections import defaultdict
 from datetime import datetime, timedelta, date
 
@@ -536,42 +536,37 @@ def write_mysql(path, banks, accounts, txns):
                 for t in chunk) + ";\n")
         f.write("\nSET FOREIGN_KEY_CHECKS=1;\n")
 
-def write_sqlite(path, banks, accounts, txns):
-    if os.path.exists(path):
-        os.remove(path)
-    con = sqlite3.connect(path)
-    con.executescript("""
-    PRAGMA journal_mode=OFF;
-    CREATE TABLE bank (bank_code TEXT PRIMARY KEY, bank_name TEXT NOT NULL);
-    CREATE TABLE account (
-        account_id TEXT PRIMARY KEY, entity_id TEXT NOT NULL, account_number TEXT NOT NULL,
-        program_id INTEGER NOT NULL, available_balance NUMERIC NOT NULL DEFAULT 0,
-        bank_code TEXT NOT NULL REFERENCES bank(bank_code));
-    CREATE TABLE "transaction" (
-        transaction_id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES account(account_id),
-        transaction_date TEXT NOT NULL,
-        transaction_type TEXT NOT NULL CHECK (transaction_type IN ('credit','debit')),
-        description TEXT, transaction_amount NUMERIC NOT NULL DEFAULT 0,
-        transaction_reference_id TEXT, utr_number TEXT);
-    """)
-    con.executemany("INSERT INTO bank VALUES (?,?)", [(b[0], b[1]) for b in banks])
-    con.executemany("INSERT INTO account VALUES (?,?,?,?,?,?)",
-                    [(a["account_id"], a["entity_id"], a["account_number"], a["program_id"],
-                      float(a["available_balance"]), a["bank_code"]) for a in accounts])
-    con.executemany('INSERT OR IGNORE INTO "transaction" VALUES (?,?,?,?,?,?,?,?)',
-                    [(t["transaction_id"], t["account_id"], t["transaction_date"], t["transaction_type"],
-                      t["description"], float(t["transaction_amount"]),
-                      t["transaction_reference_id"] or None, t["utr_number"] or None) for t in txns])
-    con.executescript("""
-    CREATE INDEX idx_txn_date      ON "transaction" (transaction_date);
-    CREATE INDEX idx_txn_acct_date ON "transaction" (account_id, transaction_date);
-    CREATE INDEX idx_txn_type_date ON "transaction" (transaction_type, transaction_date);
-    CREATE INDEX idx_txn_ref       ON "transaction" (transaction_reference_id);
-    CREATE INDEX idx_txn_utr       ON "transaction" (utr_number);
-    CREATE INDEX idx_acct_bank     ON account (bank_code);
-    CREATE INDEX idx_acct_entity   ON account (entity_id);
-    """)
-    con.commit(); con.close()
+def load_mysql(banks, accounts, txns):
+    """Apply data/schema.sql to the configured MySQL database and load all rows.
+
+    Connection settings come from .env (see finassist.db). Any existing data in
+    bank / account / `transaction` is dropped -- the DDL leads with DROP TABLE.
+    """
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from finassist import db as _db
+
+    schema = open(os.path.join(OUT, "schema.sql")).read()
+    cx = _db.connect()
+    cx.executescript(schema)
+    cx.executemany("INSERT INTO bank (bank_code, bank_name) VALUES (?,?)",
+                   [(b[0], b[1]) for b in banks])
+    cx.executemany(
+        "INSERT INTO account (account_id, entity_id, account_number, program_id, "
+        "available_balance, bank_code) VALUES (?,?,?,?,?,?)",
+        [(a["account_id"], a["entity_id"], a["account_number"], a["program_id"],
+          float(a["available_balance"]), a["bank_code"]) for a in accounts])
+
+    rows = [(t["transaction_id"], t["account_id"], t["transaction_date"],
+             t["transaction_type"], t["description"], float(t["transaction_amount"]),
+             t["transaction_reference_id"] or None, t["utr_number"] or None) for t in txns]
+    B = 2000
+    for i in range(0, len(rows), B):
+        cx.executemany(
+            "INSERT IGNORE INTO `transaction` (transaction_id, account_id, transaction_date, "
+            "transaction_type, description, transaction_amount, transaction_reference_id, "
+            "utr_number) VALUES (?,?,?,?,?,?,?,?)", rows[i:i + B])
+    cx.commit()
+    cx.close()
 
 def main():
     ap = argparse.ArgumentParser()
@@ -579,6 +574,8 @@ def main():
     ap.add_argument("--accounts", type=int, default=80)
     ap.add_argument("--entities", type=int, default=48)
     ap.add_argument("--dirty", action="store_true")
+    ap.add_argument("--no-load", action="store_true",
+                    help="skip loading into MySQL; only write CSV/SQL files")
     a = ap.parse_args()
 
     os.makedirs(OUT, exist_ok=True)
@@ -607,7 +604,9 @@ def main():
               ["entity_id", "entity_name"])
 
     write_mysql(f"{OUT}/seed_mysql.sql", BANKS, accounts, txns)
-    write_sqlite(f"{OUT}/finance.sqlite", BANKS, accounts, txns)
+    if not a.no_load:
+        print("loading into MySQL ...", flush=True)
+        load_mysql(BANKS, accounts, txns)
 
     print("done.")
     for n in dirty_notes:

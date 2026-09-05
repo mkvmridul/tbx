@@ -12,22 +12,32 @@ that produced it, and a CSV export.
 
 ## Run it
 
-No `pip install`. The whole engine is Python standard library.
+Prereqs: a running MySQL 8+, and `pip install -r requirements.txt` (just `PyMySQL`).
 
 ```bash
-python -m finassist.enrich data/finance.sqlite   # build the derived tables (~10 s)
+# 1. Point .env at your MySQL and create the database
+cp .env .env.local            # edit MYSQL_PASSWORD etc.
+mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS finance CHARACTER SET utf8mb4;"
+
+# 2. Generate + load the dataset (writes CSVs, seed SQL, and loads into MySQL)
+python generate_dataset.py                       # 100,000 transactions (default)
+
+# 3. Build the derived tables (counterparty, transaction_enriched) — ~10 s
+python -m finassist.enrich
+
+# 4. Start the assistant
 python -m api.server                             # http://localhost:8720
 ```
 
-That is the entire setup. Open the URL and ask a question.
+Open the URL and ask a question.
 
-<details><summary>Building the dataset from scratch, or a bigger one</summary>
+<details><summary>A bigger dataset, or dirty rows</summary>
 
 ```bash
-python generate_dataset.py                        # 100,000 transactions (default)
 python generate_dataset.py --transactions 500000  # bigger
 python generate_dataset.py --dirty                # inject the malformed rows found in the real sample
-python -m finassist.enrich data/finance.sqlite
+python generate_dataset.py --no-load              # write files only, don't touch MySQL
+python -m finassist.enrich
 ```
 
 The generator is seeded, so a rerun reproduces the same data byte for byte. See
@@ -37,9 +47,9 @@ The generator is seeded, so a rerun reproduces the same data byte for byte. See
 <details><summary>Turning the language model on (optional)</summary>
 
 ```bash
-export LLM_API_KEY=sk-...        # or OPENAI_API_KEY
+export LLM_API_KEY=sk-...        # or OPENAI_API_KEY  (or drop into .env)
 export LLM_MODEL=gpt-4o-mini     # any small model; or point LLM_BASE_URL at a local one
-pip install openai               # the project's only third-party dependency
+pip install openai
 python -m api.server
 ```
 

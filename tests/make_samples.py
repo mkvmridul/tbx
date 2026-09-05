@@ -45,8 +45,8 @@ def fmt(v, unit):
     return str(v)
 
 
-def main(db="data/finance.sqlite", out="SAMPLE_ANSWERS.md"):
-    eng = Engine(db, use_llm=False)
+def main(out="SAMPLE_ANSWERS.md"):
+    eng = Engine(use_llm=False)
     st = eng.stats()
     L = [
         "# Sample questions and answers",

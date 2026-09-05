@@ -1,6 +1,6 @@
 """finassist/engine.py — question in, grounded answer out.
 
-    engine = Engine("data/finance.sqlite")
+    engine = Engine()
     ans = engine.ask("How much did we pay Blue Dart last month?")
 
 The pipeline, in order. Every step before narration is deterministic:
@@ -16,10 +16,10 @@ already decided what the answer is, and the check becomes a formality.
 """
 from __future__ import annotations
 
-import sqlite3
 import time
 from dataclasses import dataclass, field, asdict
 
+from finassist import db as _db
 from finassist import plan as planner
 from finassist.intents import REGISTRY, Ctx, Result
 from finassist.narrate import narrate, demo_fabrication
@@ -80,25 +80,24 @@ class Session:
 
 
 class Engine:
-    def __init__(self, db_path: str = "data/finance.sqlite", cfg: dict | None = None,
-                 use_llm: bool = True):
-        self.db_path = db_path
+    def __init__(self, cfg: dict | None = None, use_llm: bool = True):
         self.cfg = cfg or {}
         self.use_llm = use_llm
-        self.cx = sqlite3.connect(db_path, check_same_thread=False)
-        self.cx.row_factory = sqlite3.Row
+        self.cx = _db.connect()
+        self.db_label = _db.dsn_label()
         self._check_enriched()
         self.today = anchor(self.cx)
         self.cov_start, self.cov_end = coverage(self.cx)
 
     def _check_enriched(self):
         t = {r[0] for r in self.cx.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'")}
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = DATABASE()")}
         missing = {"transaction_enriched", "counterparty"} - t
         if missing:
             raise RuntimeError(
-                f"{self.db_path} is missing {', '.join(sorted(missing))}. "
-                f"Run:  python -m finassist.enrich {self.db_path}")
+                f"{self.db_label} is missing {', '.join(sorted(missing))}. "
+                f"Run:  python -m finassist.enrich")
 
     # ---------------------------------------------------------------- guards
 
@@ -252,7 +251,7 @@ class Engine:
     def stats(self) -> dict:
         q = lambda s: self.cx.execute(s).fetchone()[0]
         return {
-            "database": self.db_path,
+            "database": self.db_label,
             "transactions": q("SELECT COUNT(*) FROM transaction_enriched"),
             "counterparties": q("SELECT COUNT(*) FROM counterparty"),
             "accounts": q("SELECT COUNT(*) FROM account"),

@@ -69,9 +69,9 @@ def grade(q: dict, ans) -> tuple[bool, str]:
     return False, f"got {got}, expected {exp}"
 
 
-def main(use_llm: bool = False, db: str = "data/finance.sqlite") -> int:
+def main(use_llm: bool = False) -> int:
     key = json.load(open("data/truth/answer_key.json"))
-    eng = Engine(db, use_llm=use_llm)
+    eng = Engine(use_llm=use_llm)
 
     # Index questions so a multi_turn one can be replayed after its predecessor.
     qs = key["questions"]
@@ -111,6 +111,5 @@ def main(use_llm: bool = False, db: str = "data/finance.sqlite") -> int:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--llm", action="store_true", help="use the model planner as well")
-    ap.add_argument("--db", default="data/finance.sqlite")
     a = ap.parse_args()
-    sys.exit(main(a.llm, a.db))
+    sys.exit(main(a.llm))

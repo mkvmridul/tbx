@@ -17,9 +17,10 @@ from __future__ import annotations
 
 import calendar
 import re
-import sqlite3
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+
+from finassist import db as _db
 
 MONTHS = {m.lower(): i for i, m in enumerate(calendar.month_name) if m}
 MONTHS.update({m.lower(): i for i, m in enumerate(calendar.month_abbr) if m})
@@ -56,15 +57,23 @@ class Resolution:
         return self.value is None and not self.candidates
 
 
-def anchor(cx: sqlite3.Connection) -> date:
+def _to_date(v) -> date | None:
+    if v is None:
+        return None
+    if isinstance(v, date):
+        return v
+    return date.fromisoformat(str(v)[:10])
+
+
+def anchor(cx: _db.Connection) -> date:
     """The most recent transaction date. This is 'today' for every relative period."""
     row = cx.execute("SELECT MAX(txn_date) FROM transaction_enriched").fetchone()
-    return date.fromisoformat(row[0]) if row and row[0] else date.today()
+    return _to_date(row[0]) or date.today()
 
 
-def coverage(cx: sqlite3.Connection) -> tuple[str, str]:
+def coverage(cx: _db.Connection) -> tuple[str, str]:
     r = cx.execute("SELECT MIN(txn_date), MAX(txn_date) FROM transaction_enriched").fetchone()
-    return (r[0], r[1]) if r else ("", "")
+    return (str(r[0])[:10], str(r[1])[:10]) if r and r[0] else ("", "")
 
 
 def _month_bounds(y: int, m: int) -> tuple[str, str]:
@@ -183,7 +192,7 @@ _STOP = {"the", "a", "an", "to", "for", "on", "in", "of", "we", "did", "how", "m
          "quarter", "total", "with", "at", "our", "us", "and", "vendor", "supplier"}
 
 
-def resolve_counterparty(cx: sqlite3.Connection, text: str, limit: int = 8) -> Resolution:
+def resolve_counterparty(cx: _db.Connection, text: str, limit: int = 8) -> Resolution:
     """Find the counterparty a user named.
 
     Matching is layered, strictest first, and STOPS at the first layer that produces

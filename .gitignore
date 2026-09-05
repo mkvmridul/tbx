@@ -7,7 +7,6 @@ __pycache__/
 
 # Generated data. `python generate_dataset.py` (seed 20260905) rebuilds all of this
 # byte-for-byte, so none of it belongs in git.
-data/*.sqlite
 data/*.csv
 data/seed_mysql.sql
 data/truth/transaction_truth.csv

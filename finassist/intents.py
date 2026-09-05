@@ -14,10 +14,10 @@ easiest way to produce a plausible wrong total.
 """
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import dataclass, field, asdict
 from typing import Any
 
+from finassist import db as _db
 from finassist.resolve import Period, previous_period
 
 MONEY, COUNT, PCT, TEXT = "INR", "count", "percent", "text"
@@ -59,7 +59,7 @@ class Ctx:
     """Runs SQL and numbers the evidence as it goes, so ev_1..ev_N are in the order the
     narration will cite them."""
 
-    def __init__(self, cx: sqlite3.Connection):
+    def __init__(self, cx: _db.Connection):
         self.cx = cx
         self._n = 0
 
@@ -152,7 +152,7 @@ def spend_total(ctx: Ctx, *, period: Period | None = None, category: str | None 
                 exclude_charges: bool = True, **_) -> Result:
     """Total outgoing payments in a period, optionally for one category."""
     r = Result("spend_total")
-    extra = "category IS NOT DISTINCT FROM category" if not exclude_charges else "rail <> 'CHARGES'"
+    extra = "1=1" if not exclude_charges else "rail <> 'CHARGES'"
     w, p = _where(period, category=category, extra=extra)
     _period_facts(r, period)
     if category:
