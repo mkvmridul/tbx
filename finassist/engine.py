@@ -310,6 +310,7 @@ class Engine:
         q = lambda s: self.cx.execute(s).fetchone()[0]
         return {
             "database": self.db_label,
+            "source": _db.source_label(),
             "transactions": q("SELECT COUNT(*) FROM transaction_enriched"),
             "counterparties": q("SELECT COUNT(*) FROM counterparty"),
             "accounts": q("SELECT COUNT(*) FROM account"),
