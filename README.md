@@ -5,6 +5,9 @@
 Ask about your transaction data in plain English. Get an answer, the rows behind it, the SQL
 that produced it, and a CSV export.
 
+Demo:
+[Demo_of_finassist.pptx](https://github.com/user-attachments/files/31864146/Demo_of_finassist.pptx)
+
 > **SQL computes. The model only reads the answer out loud — and a validator checks every
 > digit against a query result before it reaches you.**
 
@@ -214,6 +217,5 @@ The evidence-ledger and `{{ev_N}}` numeric-validator pattern is carried over fro
 It transfers to finance almost unchanged, and matters more here: a wrong number in a finance
 answer is a liability, not a cosmetic bug.
 
-Demo:
-[Demo_of_finassist.pptx](https://github.com/user-attachments/files/31864146/Demo_of_finassist.pptx)
+
 
