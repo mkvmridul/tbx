@@ -180,8 +180,13 @@ class Connection:
             c.close()
 
     def executescript(self, script: str):
-        """Run multiple `;`-separated statements. Naive split -- our DDL has
-        no `;` inside string literals, so this is safe here."""
+        """Run multiple `;`-separated statements. Strips `-- line comments` and
+        `/* block comments */` first; our DDL has no `;` inside string literals,
+        so a plain split is safe here."""
+        # remove /* ... */ blocks
+        script = re.sub(r"/\*.*?\*/", "", script, flags=re.S)
+        # remove -- line comments (to end of line)
+        script = re.sub(r"(?m)--[^\n]*", "", script)
         with self._lock:
             c = self._conn.cursor()
             for stmt in script.split(";"):

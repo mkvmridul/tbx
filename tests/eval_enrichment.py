@@ -72,7 +72,8 @@ def main(truth="data/truth/transaction_truth.csv"):
     # ---- anomaly -----------------------------------------------------------
     tp = sum(1 for tid, t in truth_rows.items() if tid in got and t["is_anomaly"] == "1" and got[tid]["is_anomaly"])
     fp = sum(1 for tid, t in truth_rows.items() if tid in got and t["is_anomaly"] == "0" and got[tid]["is_anomaly"])
-    fn = sum(1 for tid, t in truth_rows.items() if tid in got and t["is_anomaly"] == "1" and not got[tid]["is_anomaly"])    prec = tp / (tp + fp) if tp + fp else 0.0
+    fn = sum(1 for tid, t in truth_rows.items() if tid in got and t["is_anomaly"] == "1" and not got[tid]["is_anomaly"])
+    prec = tp / (tp + fp) if tp + fp else 0.0
     rec = tp / (tp + fn) if tp + fn else 0.0
 
     W = 34
