@@ -157,7 +157,8 @@ class Engine:
         # --- follow-up: inherit last turn's subject ---------------------------
         if p.intent == "follow_up":
             p = planner.Plan(session.intent or "spend_total", {}, "inherited")
-        elif p.confidence == "low" and session.intent and p.source == "rules":
+        elif (p.confidence == "low" and session.intent and p.source == "rules"
+              and (_is_follow_up(question) or _about_money(question))):
             # The rules recognised no intent and were about to fall back to a whole-company
             # total. Mid-conversation that is the wrong default: "How many were there in
             # August?" after a reconciliation question is still about reconciliation.
@@ -352,8 +353,17 @@ def _sources(result, db_label: str, model: str, plan_source: str) -> dict:
     period = (result.period or {}).get("label") or "none"
     # Rows the breakdown table is built from, plus rows behind each scalar value.
     rows_returned = len(result.rows) + sum(int(e.row_count or 0) for e in result.evidence)
+    src = _db.source_label()
+    mirrored = src != db_label
     return {
-        "database": db_label,
+        # Where the raw bank/account/transaction rows ORIGINATE. When the source is a
+        # separate read-only server, naming only the local mirror overstates provenance:
+        # the figures trace back to the source, the mirror is just where derived tables
+        # are allowed to be written.
+        "database": src,
+        "origin": src,
+        "derived_in": db_label if mirrored else None,
+        "mirrored": mirrored,
         "tables": tables,
         "queries": len(result.evidence),
         "evidence_values": len(result.evidence),
@@ -365,3 +375,7 @@ def _sources(result, db_label: str, model: str, plan_source: str) -> dict:
         "narration": model,
         "planner": plan_source,
     }
+
+# Broadened so ordinary data questions ("how many accounts", "which bank", "list vendors") are
+# never turned away as off-topic.
+_MONEY_WORDS = tuple(_MONEY_WORDS) + ("account", "how many", "how much", "which", "list", "show", "count", "total", "bank", "top", "largest")

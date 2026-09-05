@@ -242,10 +242,13 @@ function renderVisual(cols, rows, force = false) {
 function renderSources(s) {
   if (!s) return '';
   const tables = (s.tables || []).map(t => `<code>${esc(t)}</code>`).join(' ') || '—';
+  const mirror = s.mirrored && s.derived_in
+    ? `<span>Derived tables in</span><b>${esc(s.derived_in)}</b>` : '';
   return `<div class="src">
     <div class="src-title">Sources used</div>
     <div class="src-grid">
-      <span>Database</span><b>${esc(s.database)}</b>
+      <span>Source database</span><b>${esc(s.database)}</b>
+      ${mirror}
       <span>Tables read</span><span>${tables}</span>
       <span>SQL queries run</span><b>${s.queries}</b>
       <span>Values computed</span><b>${s.evidence_values}</b>

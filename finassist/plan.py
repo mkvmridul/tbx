@@ -46,6 +46,8 @@ UNSUPPORTED = [
 # Intent keyword rules, most specific first. `needs_vendor` means the rule only applies when
 # a counterparty was actually resolved, so "top vendors" does not become a single-vendor query.
 RULES = [
+    ("top_counterparties",   r"\b(list|show|all|every|which)\b.*\b(vendors?|suppliers?|counterpart\w+|payees?|merchants?)\b(?!.*\baccounts?\b)"),
+    ("account_balances",     r"\b(how many|number of|count of|list(?: all)?|show(?: me)?(?: all)?)\b.*\baccounts?\b|\baccounts? (?:do we have|are there|are present|exist)\b"),
     ("recon_summary",        r"\b(reconcil\w*|matched|matching)\b.*\b(summary|status|overview|breakdown|split|how many)\b|\bhow much is (un)?reconciled\b|\bwhat(?:'s| is) (?:the )?(reconciliation|matching) status\b"),
     ("unreconciled",         r"\b(unreconciled|un-?reconciled|not reconciled|outstanding|unmatched|pending match|still open|not matched)\b"),
     ("compare_periods",      r"\b(compare|comparison|versus|vs\.?|against|difference)\b|\bmonth before\b|\bprevious (month|quarter|year)\b|\bhow does that compare\b|\bchange (from|vs)\b|\b(up|down) from last\b|\bmore or less than last\b"),
@@ -326,8 +328,12 @@ def plan_by_llm(question: str, history: list[str], cfg: dict | None = None) -> P
 
     intent = str(raw.get("intent") or "").strip()
     if intent == "unsupported":
-        return Plan("unsupported", reason=str(raw.get("reason") or "").strip()
-                    or "The data cannot answer that.", source="llm")
+        # Only the regex list may refuse. A model saying "unsupported" for anything else means
+        # "unsure": fall back to the rules plan rather than turn a data question away.
+        if check_unsupported(question):
+            return Plan("unsupported", reason=str(raw.get("reason") or "").strip()
+                        or "The data cannot answer that.", source="llm")
+        return None
     if intent == "follow_up":
         return Plan("follow_up", source="llm")
     if intent not in REGISTRY:
