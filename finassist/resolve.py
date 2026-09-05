@@ -99,6 +99,19 @@ def resolve_period(text: str, today: date) -> Period | None:
     if m := re.search(r"(\d{4}-\d{2}-\d{2})\s*(?:to|and|-|until|through)\s*(\d{4}-\d{2}-\d{2})", t):
         return Period(m.group(1), m.group(2), f"{m.group(1)} to {m.group(2)}")
 
+    # Natural-language month range: "January 2026 till July 2026" or
+    # "Jan through Jul 2026". Resolve both endpoints before the single-month parser.
+    month_names = "|".join(re.escape(name) for name in sorted(MONTHS, key=len, reverse=True))
+    if m := re.search(
+            rf"\b({month_names})\s+(\d{{4}})\s*(?:to|through|till|until|and|-)\s*"
+            rf"({month_names})(?:\s+(\d{{4}}))?\b", t):
+        start_name, start_year, end_name, end_year = m.groups()
+        sy, sm = int(start_year), MONTHS[start_name.lower()]
+        ey, em = int(end_year or start_year), MONTHS[end_name.lower()]
+        start, _ = _month_bounds(sy, sm)
+        _, end = _month_bounds(ey, em)
+        return Period(start, end, f"{calendar.month_name[sm]} {sy} to {calendar.month_name[em]} {ey}")
+
     # explicit ISO month
     if m := re.search(r"\b(\d{4})-(\d{2})\b", t):
         y, mo = int(m.group(1)), int(m.group(2))
@@ -119,7 +132,7 @@ def resolve_period(text: str, today: date) -> Period | None:
         s, _ = _month_bounds(y, mo)
         return Period(s, today.isoformat(), f"last {n} months")
 
-    if "last month" in t or "previous month" in t or "prior month" in t:
+    if "last month" in t or "prev month" in t or "previous month" in t or "prior month" in t:
         y, mo = _shift_month(today, -1)
         s, e = _month_bounds(y, mo)
         return Period(s, e, f"{calendar.month_name[mo]} {y}")

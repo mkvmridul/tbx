@@ -83,12 +83,14 @@ class Ctx:
 # shared SQL fragments
 # --------------------------------------------------------------------------
 
-def _where(period: Period | None, cp_id: str | None = None, category: str | None = None,
+def _where(period: Period | None, cp_id: str | list[str] | None = None, category: str | None = None,
            extra: str = "") -> tuple[str, list]:
     w, p = ["1=1"], []
     if period:
         w.append("txn_date BETWEEN ? AND ?"); p += [period.start, period.end]
-    if cp_id:
+    if isinstance(cp_id, list):
+        w.append(f"counterparty_id IN ({','.join('?' for _ in cp_id)})"); p += cp_id
+    elif cp_id:
         w.append("counterparty_id = ?"); p.append(cp_id)
     if category:
         w.append("category = ?"); p.append(category)
@@ -114,14 +116,19 @@ def _period_facts(r: Result, period: Period | None) -> None:
 # intents
 # --------------------------------------------------------------------------
 
-def spend_by_counterparty(ctx: Ctx, *, counterparty: dict, period: Period | None = None,
+def spend_by_counterparty(ctx: Ctx, *, counterparty: dict | None = None,
+                          counterparties: list[dict] | None = None,
+                          period: Period | None = None,
                           **_) -> Result:
     """How much did we pay <vendor> in <period>?"""
     r = Result("spend_by_counterparty")
-    cid, name = counterparty["counterparty_id"], counterparty["canonical_name"]
-    w, p = _where(period, cid)
+    selected = counterparties or ([counterparty] if counterparty else [])
+    ids = [cp["counterparty_id"] for cp in selected]
+    names = [cp["canonical_name"] for cp in selected]
+    name = names[0] if len(names) == 1 else f"{len(names)} matching counterparties"
+    w, p = _where(period, ids)
     _period_facts(r, period)
-    r.facts.append(f"counterparty: {name}")
+    r.facts.append("counterparties: " + ", ".join(names))
 
     ev_deb = ctx.one(f"total paid to {name}", MONEY, DEBIT_SUM.format(w=w), p)
     ev_cnt = ctx.one(f"number of payments to {name}", COUNT, DEBIT_CNT.format(w=w), p)
@@ -162,9 +169,18 @@ def spend_total(ctx: Ctx, *, period: Period | None = None, category: str | None 
     if exclude_charges:
         r.facts.append("bank charges excluded")
 
-    ev_deb = ctx.one("total paid out", MONEY, DEBIT_SUM.format(w=w), p)
-    ev_cnt = ctx.one("number of payments", COUNT, DEBIT_CNT.format(w=w), p)
-    ev_cre = ctx.one("total received", MONEY, CREDIT_SUM.format(w=w), p)
+    summary_sql = f"""SELECT
+        COALESCE(SUM(CASE WHEN transaction_type='debit' THEN amount ELSE 0 END), 0) AS paid_out,
+        SUM(CASE WHEN transaction_type='debit' THEN 1 ELSE 0 END) AS payment_count,
+        COALESCE(SUM(CASE WHEN transaction_type='credit' THEN amount ELSE 0 END), 0) AS received
+        FROM transaction_enriched WHERE {w}"""
+    summary = ctx.cx.execute(summary_sql, p).fetchone()
+    ev_deb = ctx.note("total paid out", MONEY, round(float(summary["paid_out"] or 0), 2),
+                      summary_sql, p, 1)
+    ev_cnt = ctx.note("number of payments", COUNT, int(summary["payment_count"] or 0),
+                      summary_sql, p, 1)
+    ev_cre = ctx.note("total received", MONEY, round(float(summary["received"] or 0), 2),
+                      summary_sql, p, 1)
     r.evidence += [ev_deb, ev_cnt, ev_cre]
     if ev_cnt.value == 0:
         r.status = "empty"
@@ -187,7 +203,7 @@ def spend_total(ctx: Ctx, *, period: Period | None = None, category: str | None 
 def top_counterparties(ctx: Ctx, *, period: Period | None = None, limit: int = 10, **_) -> Result:
     """Who did we pay the most?"""
     r = Result("top_counterparties")
-    limit = max(1, min(int(limit or 10), 100))
+    limit = max(1, min(int(limit or 10), 200))
     w, p = _where(period, extra="counterparty_id IS NOT NULL")
     _period_facts(r, period)
 
@@ -402,22 +418,46 @@ def transaction_search(ctx: Ctx, *, reference: str | None = None, period: Period
     return r
 
 
-def account_balances(ctx: Ctx, *, limit: int = 100, **_) -> Result:
+def account_balances(ctx: Ctx, *, limit: int = 100, recent: bool = False,
+                     by_amount: bool = False, bank: str | None = None, **_) -> Result:
     r = Result("account_balances")
-    sql = """SELECT a.account_id, b.bank_name, a.program_id, a.available_balance
-             FROM account a JOIN bank b USING (bank_code)
-             ORDER BY a.available_balance DESC LIMIT ?"""
-    r.columns = ["account_id", "bank", "program_id", "available_balance"]
-    r.rows = ctx.many(sql, [int(limit)])
+    bank_w, bank_p = ("b.bank_code = ?", [bank]) if bank else ("1=1", [])
+    if recent:
+        order = "te.amount DESC" if by_amount else "te.txn_date DESC, te.transaction_id DESC"
+        sql = f"""SELECT a.account_number, a.entity_id, b.bank_name, te.txn_date,
+                         te.transaction_type, te.amount
+                  FROM transaction_enriched te
+                  JOIN account a USING (account_id)
+                  JOIN bank b USING (bank_code)
+                  WHERE {bank_w}
+                  ORDER BY {order} LIMIT ?"""
+        r.columns = ["account_number", "entity_id", "bank", "transaction_date", "type", "amount"]
+    else:
+        sql = f"""SELECT a.account_number, a.entity_id, b.bank_name, a.program_id, a.available_balance
+                 FROM account a JOIN bank b USING (bank_code)
+                 WHERE {bank_w}
+                 ORDER BY a.available_balance DESC LIMIT ?"""
+        r.columns = ["account_number", "entity_id", "bank", "program_id", "available_balance"]
+    r.rows = ctx.many(sql, bank_p + [int(limit)])
     if not r.rows:
         r.status = "empty"; return r
-    ev_n = ctx.one("accounts", COUNT, "SELECT COUNT(*) FROM account", [])
-    ev_s = ctx.one("net balance across all accounts", MONEY,
-                   "SELECT COALESCE(SUM(available_balance),0) FROM account", [])
+    scope = f" at {r.rows[0][2]}" if bank else " across all accounts"
+    if bank:
+        r.facts.append(f"bank filter: {r.rows[0][2]}")
+    ev_n = ctx.one("accounts" + scope, COUNT,
+                   f"SELECT COUNT(*) FROM account a JOIN bank b USING (bank_code) WHERE {bank_w}",
+                   bank_p)
+    ev_s = ctx.one("net balance" + scope, MONEY,
+                   f"SELECT COALESCE(SUM(a.available_balance),0) FROM account a "
+                   f"JOIN bank b USING (bank_code) WHERE {bank_w}", bank_p)
     r.evidence += [ev_n, ev_s]
-    r.notes.append("available_balance is the net of each account's transactions. Negative "
-                   "values are a sign convention in this data, not confirmed overdrafts.")
-    r.headline = {"label": "net balance across all accounts", "value": ev_s.value,
+    if recent:
+        r.notes.append("These are the account numbers attached to the "
+                       + ("largest" if by_amount else "most recent") + " transactions.")
+    else:
+        r.notes.append("available_balance is the net of each account's transactions. Negative "
+                       "values are a sign convention in this data, not confirmed overdrafts.")
+    r.headline = {"label": "net balance" + scope, "value": ev_s.value,
                   "unit": MONEY, "evidence_id": ev_s.id}
     return r
 
@@ -491,7 +531,7 @@ SLOTS = {
     "recon_summary":         ["period"],
     "anomalies":             ["period", "counterparty", "limit"],
     "transaction_search":    ["reference", "period", "counterparty", "limit"],
-    "account_balances":      ["limit"],
+    "account_balances":      ["limit", "recent", "by_amount", "bank"],
     "counterparty_profile":  ["counterparty"],
     "spend_by_bank":         ["period"],
 }

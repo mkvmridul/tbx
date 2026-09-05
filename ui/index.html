@@ -42,6 +42,8 @@ h1 span{color:var(--accent)}
   padding:6px 11px;border-radius:999px;font-size:12.5px;cursor:pointer;transition:.12s}
 .presets button:hover{border-color:var(--accent);color:var(--accent)}
 .presets button.danger{border-color:var(--stop);color:var(--stop)}
+.visual-toggle{display:flex;align-items:center;gap:8px;margin:0 0 18px;color:var(--muted);font-size:12.5px}
+.visual-toggle input{accent-color:var(--accent);width:15px;height:15px}
 .turn{margin-bottom:22px}
 .q{font-weight:600;margin-bottom:9px;display:flex;gap:9px;align-items:flex-start}
 .q::before{content:"›";color:var(--accent);font-weight:700}
@@ -56,6 +58,20 @@ h1 span{color:var(--accent)}
   border-radius:8px;margin-bottom:13px;flex-wrap:wrap}
 .headline .v{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.4px}
 .headline .l{color:var(--muted);font-size:13px}
+.visual{border:1px solid var(--line);border-radius:8px;padding:13px 15px;margin:12px 0 13px;background:var(--panel)}
+.visual-title{font-size:12px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.4px;margin-bottom:10px}
+.visual-summary{margin:0 0 12px;color:var(--ink);font-size:13.5px;line-height:1.45}
+.src{margin-top:11px;border-top:1px solid var(--line);padding-top:10px;font-size:12.5px;color:var(--muted)}
+.src-title{font-weight:700;text-transform:uppercase;letter-spacing:.4px;font-size:11px;margin-bottom:7px}
+.src-grid{display:grid;grid-template-columns:auto 1fr;gap:4px 12px}
+.src-grid b{color:var(--ink);font-weight:600}
+.src code{background:var(--code);border:1px solid var(--line);border-radius:5px;padding:1px 6px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:var(--accent)}
+.bar-row{display:grid;grid-template-columns:minmax(120px, .8fr) minmax(100px, 2fr) auto;gap:9px;align-items:center;margin:8px 0;font-size:12.5px}
+.bar-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar-track{height:10px;background:var(--code);border-radius:99px;overflow:hidden;box-shadow:inset 0 0 0 1px var(--line)}
+.bar-fill{display:block;width:var(--bar-width);height:100%;background:var(--accent);border-radius:99px;min-width:3px}
+.bar-value{color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}
 details{margin-top:11px;border-top:1px solid var(--line);padding-top:11px}
 summary{cursor:pointer;font-size:13px;color:var(--muted);font-weight:600;user-select:none}
 summary:hover{color:var(--accent)}
@@ -107,6 +123,7 @@ input[type=text]:focus{outline:none;border-color:var(--accent)}
 
 <div class="wrap">
   <div class="presets" id="presets"></div>
+  <label class="visual-toggle"><input type="checkbox" id="visualToggle"> Show visual analysis</label>
   <div id="log"></div>
 </div>
 
@@ -120,6 +137,8 @@ const SID = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()));
 const log = document.getElementById('log');
 const qEl = document.getElementById('q');
 const sendEl = document.getElementById('send');
+const visualToggle = document.getElementById('visualToggle');
+const showVisuals = () => visualToggle.checked;
 
 const PRESETS = [
   "How much did we spend on vendor payouts last month?",
@@ -172,6 +191,16 @@ function sourceBadge(a) {
   return '<span class="pill p-ok">computed · deterministic</span>';
 }
 
+function confidenceBadge(a) {
+  const labels = {
+    high: 'high confidence', medium: 'medium confidence',
+    'model-validated': 'model validated', guarded: 'guardrail', clarification: 'needs clarification'
+  };
+  const value = labels[a.confidence] || 'confidence unavailable';
+  const cls = a.confidence === 'guarded' || a.confidence === 'clarification' ? 'p-warn' : 'p-ok';
+  return `<span class="pill ${cls}">${value}</span>`;
+}
+
 function renderTable(cols, rows, cap) {
   if (!rows || !rows.length) return '';
   const head = cols.map(c => `<th>${esc(c)}</th>`).join('');
@@ -181,6 +210,51 @@ function renderTable(cols, rows, cap) {
   ).join('');
   const more = rows.length > cap ? `<div class="note">Showing ${cap} of ${rows.length.toLocaleString('en-IN')} rows. Export the CSV for all of them.</div>` : '';
   return `<div class="scroll"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>${more}`;
+}
+
+function renderVisual(cols, rows, force = false) {
+  if ((!force && !showVisuals()) || !cols || !rows || rows.length < 2) return '';
+  const numericCols = cols.map((c, i) => ({c: String(c).toLowerCase(), i}))
+    .filter(x => rows.some(r => typeof r[x.i] === 'number'));
+  if (!numericCols.length) return '';
+  const preferred = numericCols.filter(x => /total|amount|paid|spend|value|received|balance/.test(x.c));
+  const metric = (preferred.length ? preferred : numericCols)[0];
+  const points = rows.filter(r => typeof r[metric.i] === 'number' && r[0] !== null)
+    .map(r => ({label: r[0], value: Number(r[metric.i])}))
+    .filter(p => Number.isFinite(p.value));
+  if (points.length < 2) return '';
+  const top = [...points].sort((a, b) => Math.abs(b.value) - Math.abs(a.value)).slice(0, 8);
+  const max = Math.max(...top.map(p => Math.abs(p.value)), 1);
+  const unit = /amount|total|paid|spend|value|received|balance/.test(metric.c) ? 'INR' : 'count';
+  const prettyMetric = String(cols[metric.i]).replace(/[_-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  const lead = `${esc(top[0].label)} leads with ${fmt(top[0].value, unit)}`;
+  const runnerUp = top[1] ? `, followed by ${esc(top[1].label)} at ${fmt(top[1].value, unit)}` : '';
+  const summary = `${lead}${runnerUp}.`;
+  const bars = top.map((p, index) => `<div class="bar-row">
+    <span class="bar-label" title="${esc(p.label)}">${esc(p.label)}</span>
+    <span class="bar-track"><span class="bar-fill" style="--bar-width:${Math.max(3, Math.round(Math.abs(p.value) / max * 100))}%"></span></span>
+    <span class="bar-value">${fmt(p.value, unit)}</span>
+  </div>`).join('');
+  return `<div class="visual"><div class="visual-title">Visual summary · ${esc(prettyMetric)} · top ${top.length}</div>
+    <p class="visual-summary">${summary}</p>${bars}</div>`;
+}
+
+function renderSources(s) {
+  if (!s) return '';
+  const tables = (s.tables || []).map(t => `<code>${esc(t)}</code>`).join(' ') || '—';
+  return `<div class="src">
+    <div class="src-title">Sources used</div>
+    <div class="src-grid">
+      <span>Database</span><b>${esc(s.database)}</b>
+      <span>Tables read</span><span>${tables}</span>
+      <span>SQL queries run</span><b>${s.queries}</b>
+      <span>Values computed</span><b>${s.evidence_values}</b>
+      <span>Rows returned</span><b>${Number(s.rows_returned).toLocaleString('en-IN')}</b>
+      <span>Period filter</span><b>${esc(s.period)}</b>
+      <span>Question read by</span><b>${esc(s.interpreted_by)}</b>
+      <span>Answer written by</span><b>${esc(s.narrated_by)}</b>
+    </div>
+  </div>`;
 }
 
 function renderEvidence(ev) {
@@ -203,7 +277,7 @@ function render(a) {
 
   let chips = '';
   if (a.candidates && a.candidates.length) {
-    chips = '<div class="chips">' + a.candidates.map(c =>
+    chips = '<div class="chips"><button onclick="ask(\'all\')">All matches</button>' + a.candidates.map(c =>
       `<button onclick="ask('How much did we pay ${esc(c.canonical_name).replace(/'/g,"\\'")} ${
         a.period ? 'in ' + esc(a.period.label) : ''}?')">${esc(c.canonical_name)}</button>`).join('') + '</div>';
   }
@@ -216,8 +290,11 @@ function render(a) {
   }
 
   const notes = (a.notes || []).map(n => `<div class="note">${esc(n)}</div>`).join('');
+  const visualAction = !showVisuals() && a.rows && a.rows.length > 1
+    ? '<button class="visual-action" type="button">Show visual analysis</button>' : '';
   const act = a.exportable
     ? `<div class="act"><a href="/export.csv?session_id=${SID}&turn=${a.turn}" download>Export breakdown (CSV)</a>
+       ${visualAction}
        <span class="pill p-mute">${esc(a.intent)}</span>
        <span class="pill p-mute">${a.elapsed_ms} ms</span>
        <span class="pill p-mute">${a.llm_calls} llm call${a.llm_calls===1?'':'s'}</span></div>`
@@ -227,13 +304,22 @@ function render(a) {
 
   t.innerHTML = `<div class="q">${esc(a.question)}</div>
     <div class="card ${cls}">
-      <div class="badges">${sourceBadge(a)}</div>
+      <div class="badges">${sourceBadge(a)}${confidenceBadge(a)}</div>
       <p class="answer">${esc(a.answer)}</p>
-      ${head}${chips}${notes}
+      ${head}${chips}${notes}${renderVisual(a.columns, a.rows)}
       ${renderTable(a.columns, a.rows, 60)}
+      ${renderSources(a.sources)}
       ${renderEvidence(a.evidence)}
       ${act}
     </div>`;
+  const visualButton = t.querySelector('.visual-action');
+  if (visualButton) visualButton.onclick = () => {
+    visualButton.remove();
+    const visual = renderVisual(a.columns, a.rows, true);
+    const table = t.querySelector('.scroll');
+    if (visual && table) table.insertAdjacentHTML('beforebegin', visual);
+    else if (visual) t.querySelector('.card').insertAdjacentHTML('beforeend', visual);
+  };
   log.appendChild(t);
   t.scrollIntoView({behavior:'smooth', block:'start'});
 }
@@ -243,10 +329,14 @@ function busy(on) { sendEl.disabled = on; sendEl.textContent = on ? '…' : 'Ask
 async function ask(question) {
   if (!question || !question.trim()) return;
   qEl.value = '';
+  const pending = document.createElement('div');
+  pending.className = 'turn';
+  pending.innerHTML = `<div class="q">${esc(question)}</div>`;
+  log.appendChild(pending);
   const think = document.createElement('div');
   think.className = 'think';
   think.textContent = '· computing…';
-  log.appendChild(think);
+  pending.appendChild(think);
   think.scrollIntoView({behavior:'smooth', block:'end'});
   busy(true);
   try {
@@ -256,8 +346,12 @@ async function ask(question) {
     });
     const a = await r.json();
     think.remove();
-    if (a.error) { const e = document.createElement('div'); e.className='err'; e.textContent = a.error; log.appendChild(e); }
-    else render(a);
+    if (a.error) {
+      const e = document.createElement('div'); e.className='err'; e.textContent = a.error; pending.appendChild(e);
+    } else {
+      pending.remove();
+      render(a);
+    }
   } catch (e) {
     think.remove();
     const el = document.createElement('div'); el.className='err';

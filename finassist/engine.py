@@ -16,6 +16,7 @@ already decided what the answer is, and the check becomes a formality.
 """
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field, asdict
 
@@ -31,6 +32,7 @@ from finassist.resolve import (Period, anchor, coverage, previous_period,
 class Answer:
     question: str
     status: str = "ok"                 # ok | refused | clarify | empty
+    confidence: str = "high"            # high | medium | model-validated | guarded | clarification
     answer: str = ""
     intent: str = ""
     headline: dict | None = None
@@ -47,6 +49,7 @@ class Answer:
     plan_source: str = ""
     llm_calls: int = 0
     elapsed_ms: int = 0
+    sources: dict | None = None
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -64,6 +67,7 @@ class Session:
         self.counterparty: dict | None = None
         self.period: Period | None = None
         self.intent: str | None = None
+        self.pending_candidates: list[dict] = []
         self.history: list[str] = []
 
     def remember(self, q: str, a: Answer, period: Period | None, cp: dict | None):
@@ -76,6 +80,8 @@ class Session:
             self.counterparty = cp
         if a.intent and a.status == "ok":
             self.intent = a.intent
+        if a.status == "ok":
+            self.pending_candidates = []
         self.history = self.history[-12:]
 
 
@@ -106,16 +112,45 @@ class Engine:
 
     def _refuse(self, q: str, text: str, intent: str = "unsupported", **kw) -> Answer:
         return Answer(question=q, status="refused", answer=text, intent=intent,
-                      source="deterministic", model="guardrail", **kw)
+                      confidence="guarded", source="deterministic", model="guardrail", **kw)
 
     # ---------------------------------------------------------------- ask
 
     def ask(self, question: str, session: Session | None = None) -> Answer:
+        session = session or Session()
+        a = self._ask_once(question, session)
+        if not self._retryable(a):
+            return a
+        b = self._ask_once(question, session, force_llm=True)
+        b.llm_calls += a.llm_calls
+        return b if b.status in ("ok", "clarify") else a
+
+    def _retryable(self, a: Answer) -> bool:
+        """Whether a second opinion from the model is worth the round trip.
+
+        The five guardrails are deliberate answers, not failures: unsupported questions,
+        periods outside the data, ambiguous vendors and vendors that do not exist must stay
+        refused however the question is reworded.
+        """
+        if not self.use_llm or a.llm_calls or a.plan_source != "rules":
+            return False
+        if a.status == "empty":
+            return True
+        return (a.status == "refused"
+                and a.intent != "unsupported"
+                and not a.answer.startswith("No data for"))
+
+    def _ask_once(self, question: str, session: Session | None = None,
+                  force_llm: bool = False) -> Answer:
         t0 = time.perf_counter()
         session = session or Session()
         llm_calls = 0
 
-        p = planner.make_plan(question, session.history, self.cfg, use_llm=self.use_llm)
+        select_all = bool(session.pending_candidates and _selects_all(question))
+        p = planner.make_plan(question, session.history, self.cfg, use_llm=self.use_llm,
+                              force_llm=force_llm)
+        if select_all:
+            p = planner.Plan(session.intent or "spend_by_counterparty", {}, "inherited")
         if p.source == "llm":
             llm_calls += 1
 
@@ -144,6 +179,8 @@ class Engine:
             period = session.period or resolve_period("last month", self.today)
         if period is None and session.period and _is_follow_up(question):
             period = session.period
+        if period is None and select_all:
+            period = session.period
         if p.intent == "spend_trend" and not resolve_period(p.slots.get("period_text") or question, self.today):
             # "show me that by month" asks to widen the view, not to keep the single month
             # the previous turn was scoped to. A one-month trend line is not a trend.
@@ -163,18 +200,21 @@ class Engine:
 
         # --- resolve the counterparty ----------------------------------------
         cp = None
+        counterparties = session.pending_candidates if select_all else None
         if p.vendor_text:
             res = resolve_counterparty(self.cx, p.vendor_text)
             if res.ambiguous:
                 names = [c["canonical_name"] for c in res.candidates]
                 a = Answer(question=question, status="clarify", intent=p.intent,
                            candidates=[dict(c) for c in res.candidates],
+                           confidence="clarification",
                            source="deterministic", model="guardrail",
                            answer=(f"“{p.vendor_text}” matches {len(names)} different "
                                    f"counterparties in the data: " + ", ".join(names) +
                                    ". Which one did you mean?"))
                 a.plan_source, a.llm_calls = p.source, llm_calls
                 a.elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                session.pending_candidates = [dict(c) for c in res.candidates]
                 session.remember(question, a, period, None)
                 return a
             if res.missing:
@@ -187,7 +227,7 @@ class Engine:
                 session.remember(question, a, period, None)
                 return a
             cp = dict(res.value)
-        elif p.intent in ("spend_by_counterparty", "counterparty_profile"):
+        elif p.intent in ("spend_by_counterparty", "counterparty_profile") and not select_all:
             cp = session.counterparty          # a follow-up about the same vendor
         elif (p.intent in ("compare_periods", "spend_trend", "anomalies")
               and session.counterparty and _is_follow_up(question)):
@@ -198,7 +238,7 @@ class Engine:
             cp = session.counterparty
 
         # --- guard: required slot still missing ------------------------------
-        if err := planner.validate(p, {"counterparty": cp, "period": period}):
+        if err := planner.validate(p, {"counterparty": cp or counterparties, "period": period}):
             a = self._refuse(question,
                              f"I need a bit more to answer that: {err.replace('_', ' ')}.",
                              intent=p.intent)
@@ -212,6 +252,8 @@ class Engine:
         kwargs["period"] = period
         if cp:
             kwargs["counterparty"] = cp
+        if counterparties:
+            kwargs["counterparties"] = counterparties
         if p.intent == "compare_periods":
             kwargs["prior"] = previous_period(period)
 
@@ -232,6 +274,13 @@ class Engine:
             source=out["source"], model=out["model"], citations=out["citations"],
             plan_source=p.source, llm_calls=llm_calls,
             elapsed_ms=int((time.perf_counter() - t0) * 1000))
+        if out["source"].startswith("llm+"):
+            a.confidence = "model-validated"
+        elif p.source == "inherited":
+            a.confidence = "medium"
+        else:
+            a.confidence = "high"
+        a.sources = _sources(result, self.db_label, out["model"], p.source)
         session.remember(question, a, period, cp)
         return a
 
@@ -263,7 +312,36 @@ class Engine:
         }
 
 
+_TABLE_RE = re.compile(r"\b(?:FROM|JOIN)\s+`?([a-z_][a-z0-9_]*)`?", re.I)
+
+
+def _sources(result, db_label: str, narrator: str, plan_source: str) -> dict:
+    """Which tables and queries the shown figures actually came from."""
+    tables, queries = set(), 0
+    for e in result.evidence:
+        sql = (e.sql or "").strip()
+        if not sql or sql.startswith("--"):
+            continue          # a value computed in Python from earlier evidence
+        queries += 1
+        tables.update(t.lower() for t in _TABLE_RE.findall(sql))
+    return {
+        "database": db_label,
+        "tables": sorted(tables),
+        "queries": queries,
+        "evidence_values": len(result.evidence),
+        "rows_returned": len(result.rows),
+        "period": (result.period or {}).get("label") or "whole dataset",
+        "interpreted_by": "language model" if plan_source == "llm" else "keyword rules",
+        "narrated_by": narrator,
+    }
+
+
 def _is_follow_up(q: str) -> bool:
     ql = (q or "").lower()
     return len(ql.split()) <= 9 and any(
         w in ql for w in ("that", "it", "them", "those", "same", "and ", "what about"))
+
+
+def _selects_all(q: str) -> bool:
+    ql = " ".join((q or "").lower().split())
+    return ql in {"all", "all of them", "all options", "all matches", "everyone", "every option", "every match"}

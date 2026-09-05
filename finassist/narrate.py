@@ -68,6 +68,23 @@ def _ucfirst(s: str) -> str:
     return s[:1].upper() + s[1:] if s else s
 
 
+def _insight(result, question: str) -> str:
+    """Describe the leading grounded row and give a cautious review cue when asked."""
+    if not result.rows or len(result.rows[0]) < 3:
+        return ""
+    q = (question or "").lower()
+    wants_guidance = any(w in q for w in ("limit", "reduce", "cut", "lower", "control", "where should"))
+    if result.intent not in ("spend_total", "spend_by_category", "top_counterparties", "spend_by_bank"):
+        return ""
+    label, value = result.rows[0][0], result.rows[0][-1]
+    if not isinstance(value, (int, float)):
+        return ""
+    sentence = f"The largest recorded spending area is {label}, at {_fmt(float(value), 'INR')}."
+    if wants_guidance:
+        sentence += f" If you want to reduce spending, {label} is the first area to review."
+    return sentence
+
+
 def _facts_block(result) -> str:
     return "\n".join(f"- {f}" for f in result.facts) or "- (none)"
 
@@ -141,6 +158,17 @@ def _template(result, question: str) -> str:
 
     if result.status == "empty":
         return f"No matching transactions{where}." if where else "No matching transactions."
+    if result.intent == "account_balances" and re.search(
+            r"\bacc(?:ount|t)?\.?\s*(?:num(?:ber)?s?|nos?\.?)\b|\ba/c\b|\bbank account\b",
+            question or "", re.I):
+        if re.search(r"\b(?:t(?:ra|ar|r)[a-z]*(?:ction|cation|sction|ation)s?|txns?|trxns?)\b", question or "", re.I):
+            ranked = re.search(r"\b(highest|largest|biggest|top|maximum|max)\b|\bby amount\b",
+                               question or "", re.I)
+            which = "largest" if ranked else "most recent"
+            return (f"Here are the account numbers attached to the {len(result.rows)} {which} transactions. "
+                    "The transaction date, type, amount, and bank are shown in the table below.")
+        return (f"Here are {len(result.rows)} account numbers from the account data. "
+                "The associated bank and account details are shown in the table below.")
     if not h:
         return f"{len(result.rows):,} rows returned{where}."
 
@@ -161,7 +189,8 @@ def _template(result, question: str) -> str:
             break
     if extras:
         lead += " " + _ucfirst("; ".join(extras)) + "."
-    return lead
+    insight = _insight(result, question)
+    return f"{lead} {insight}".strip()
 
 
 def narrate(result, cfg: dict | None = None, question: str = "",
@@ -175,8 +204,10 @@ def narrate(result, cfg: dict | None = None, question: str = "",
         return {"answer": _template(result, question), "source": "deterministic",
                 "model": "template", "citations": [], "rejected": None}
 
-    key = cfg.get("LLM_API_KEY") or cfg.get("OPENAI_API_KEY") or os.environ.get("LLM_API_KEY") \
-        or os.environ.get("OPENAI_API_KEY")
+    narrate_llm = cfg.get("FINASSIST_NARRATE_LLM") or os.environ.get("FINASSIST_NARRATE_LLM", "off")
+    key = None if str(narrate_llm).lower() == "off" else (
+        cfg.get("LLM_API_KEY") or cfg.get("OPENAI_API_KEY") or os.environ.get("LLM_API_KEY")
+        or os.environ.get("OPENAI_API_KEY"))
     model = model or cfg.get("LLM_MODEL") or os.environ.get("LLM_MODEL") or "gpt-4o-mini"
     base = cfg.get("LLM_BASE_URL") or os.environ.get("LLM_BASE_URL")
 
