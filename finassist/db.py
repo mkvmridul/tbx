@@ -46,23 +46,37 @@ def _load_env() -> None:
 _load_env()
 
 
+def _from_url(url: str) -> dict | None:
+    m = re.match(r"mysql://([^:@]+)(?::([^@]*))?@([^:/]+)(?::(\d+))?/([^?]+)", url or "")
+    if not m:
+        return None
+    u, pw, h, port, db = m.groups()
+    return dict(host=h, port=int(port or 3306), user=u, password=pw or "", database=db,
+                ssl_disabled=True)
+
+
 def dsn() -> dict:
-    """Connection kwargs for pymysql. Reads FINASSIST_DB (mysql://...) if set,
-    otherwise the MYSQL_* variables."""
-    url = os.environ.get("FINASSIST_DB", "")
-    if url.startswith("mysql://"):
-        m = re.match(r"mysql://([^:@]+)(?::([^@]*))?@([^:/]+)(?::(\d+))?/([^?]+)", url)
-        if m:
-            u, pw, h, port, db = m.groups()
-            return dict(host=h, port=int(port or 3306), user=u,
-                        password=pw or "", database=db)
+    """Connection kwargs for pymysql (the WRITABLE store the engine reads). Reads
+    FINASSIST_DB (mysql://...) if set, otherwise the MYSQL_* variables. SSL is disabled:
+    both the local and the hackathon servers present self-signed certificates."""
+    d = _from_url(os.environ.get("FINASSIST_DB", ""))
+    if d:
+        return d
     return dict(
         host=os.environ.get("MYSQL_HOST", "127.0.0.1"),
         port=int(os.environ.get("MYSQL_PORT", "3306")),
         user=os.environ.get("MYSQL_USER", "root"),
         password=os.environ.get("MYSQL_PASSWORD", ""),
         database=os.environ.get("MYSQL_DB", "finance"),
+        ssl_disabled=True,
     )
+
+
+def source_dsn() -> dict:
+    """Where enrichment READS the raw bank/account/transaction tables. Defaults to dsn().
+    Set FINASSIST_SOURCE_DB when the raw data lives in a read-only database (the hackathon
+    server grants SELECT only), so derived tables are written to dsn() instead."""
+    return _from_url(os.environ.get("FINASSIST_SOURCE_DB", "")) or dsn()
 
 
 def dsn_label() -> str:
@@ -204,3 +218,12 @@ class Connection:
 
 def connect() -> Connection:
     return Connection(**dsn())
+
+
+def connect_source() -> Connection:
+    return Connection(**source_dsn())
+
+
+def source_label() -> str:
+    d = source_dsn()
+    return f"mysql://{d['user']}@{d['host']}:{d['port']}/{d['database']}"

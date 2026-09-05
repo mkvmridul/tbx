@@ -355,7 +355,7 @@ def plan_by_llm(question: str, history: list[str], cfg: dict | None = None) -> P
 
 
 def make_plan(question: str, history: list[str] | None = None, cfg: dict | None = None,
-              use_llm: bool = True) -> Plan:
+              use_llm: bool = True, force_llm: bool = False) -> Plan:
     """Rules first; the model is asked only when the rules are unsure or see a follow-up.
 
     With LLM_PLANNER_FIRST=1 the order flips: refusal patterns and reference tokens stay
@@ -371,7 +371,7 @@ def make_plan(question: str, history: list[str] | None = None, cfg: dict | None 
             return llm                                # includes follow_up / unsupported
         return rules                                  # model unreachable -> rules
     looks_like_follow_up = len((question or "").split()) <= 8 and not rules.vendor_text
-    if not use_llm or (rules.confidence == "high" and not looks_like_follow_up):
+    if not use_llm or (not force_llm and rules.confidence == "high" and not looks_like_follow_up):
         return rules
     llm = plan_by_llm(question, history or [], cfg)
     if llm is None:

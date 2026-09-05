@@ -340,3 +340,9 @@ def _is_follow_up(q: str) -> bool:
 def _selects_all(q: str) -> bool:
     ql = " ".join((q or "").lower().split())
     return ql in {"all", "all of them", "all options", "all matches", "everyone", "every option", "every match"}
+
+def _sources(result, db_label: str, model: str, plan_source: str) -> dict:
+    """Provenance for the answer: where the numbers came from and who wrote the sentence."""
+    tables = sorted({t for e in result.evidence for t in re.findall(r"(?:FROM|JOIN)\s+`?([a-z_]+)`?", e.sql or "")})
+    return {"database": db_label, "tables": tables, "queries": len(result.evidence),
+            "narration": model, "planner": plan_source}

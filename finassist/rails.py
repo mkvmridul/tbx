@@ -25,6 +25,9 @@ LOAN_REF = re.compile(r"\bZBFLCTP[0-9A-Z]{3}PBL\d{8}\b")
 # Trailing branch/scheme codes that ride along after a counterparty name, e.g.
 # "UMANG SELECTIONHAPURBPES DPF10129". Stripped so they do not fragment a vendor.
 TRAILING_CODE = re.compile(r"\s+[A-Z]{2,4}\d{4,6}$")
+# "VENDOR PAYMENT TO VIKRAM JOSHI", "DISBURSEMENT TO POOJA REDDY": the purpose phrase before
+# TO/FROM carries no identity. Up to four words, then a standalone TO or FROM.
+LEADING_PHRASE = re.compile(r"^(?:[A-Za-z]+\s+){1,4}(?:TO|FROM)\s+(?=\S)", re.I)
 
 # Location suffixes are appended after a double space on FT rails:
 #   "SELECTION ELECTRONICS   DAHISAR EAST"
@@ -55,6 +58,7 @@ def _clean(name: str | None) -> str | None:
     if not name:
         return None
     n = " ".join(name.split()).strip(" -/,.")
+    n = LEADING_PHRASE.sub("", n)
     n = TRAILING_CODE.sub("", n)
     return n.upper() or None
 
@@ -106,7 +110,7 @@ def parse(description: str | None) -> Parsed:
         return Parsed("UPI", _clean(_field(p, 1)), None, _field(p, 4), loan, None)
 
     # --- NEFT  - <IFSC> - <ref> - <acct> - <NAME> ----------------------------
-    if d.startswith("NEFT  - "):
+    if d.startswith("NEFT  - ") or d.startswith("NEFT - "):
         p = [x.strip() for x in d.split(" - ")]
         return Parsed("NEFT_SPACED", _clean(p[-1]), None, _field(p, 2), loan, _field(p, 3))
 

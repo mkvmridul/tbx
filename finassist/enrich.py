@@ -17,6 +17,7 @@ never has to read a bank narration string and never has to do arithmetic.
 from __future__ import annotations
 
 import math
+import os
 import statistics
 import sys
 from collections import defaultdict
@@ -144,12 +145,29 @@ def _date7(v):
 
 
 def build(verbose: bool = True) -> dict:
-    cx = _db.connect()
-    rows = cx.execute("""
+    cx = _db.connect()                 # writable target: derived tables land here
+    src = _db.connect_source()         # raw tables: may be a read-only server
+    since = os.environ.get("ENRICH_SINCE", "").strip()
+    where, params = ("WHERE transaction_date >= ?", [since]) if since else ("", [])
+    if _db.source_dsn() != _db.dsn():
+        # The engine joins bank/account in the target DB: mirror them from the source.
+        banks = src.execute("SELECT bank_code, bank_name FROM bank").fetchall()
+        accts = src.execute("SELECT account_id, entity_id, account_number, program_id, "
+                            "available_balance, bank_code FROM account").fetchall()
+        cx.execute("SET FOREIGN_KEY_CHECKS=0")   # the old synthetic `transaction` table points at account
+        cx.execute("DELETE FROM account"); cx.execute("DELETE FROM bank")
+        cx.execute("ALTER TABLE account MODIFY account_number VARCHAR(255)")  # source values exceed the spec's 20
+        cx.executemany("INSERT INTO bank VALUES (?,?)", [tuple(b) for b in banks])
+        for i in range(0, len(accts), 2000):
+            cx.executemany("INSERT INTO account VALUES (?,?,?,?,?,?)", [tuple(a) for a in accts[i:i + 2000]])
+        cx.execute("SET FOREIGN_KEY_CHECKS=1")
+        if verbose:
+            print(f"  mirrored {len(banks)} banks, {len(accts):,} accounts from {_db.source_label()}")
+    rows = src.execute(f"""
         SELECT transaction_id, account_id, transaction_date, transaction_type,
                description, transaction_amount, transaction_reference_id, utr_number
-        FROM `transaction`
-    """).fetchall()
+        FROM `transaction` {where}
+    """, params).fetchall()
     if verbose:
         print(f"  read {len(rows):,} transactions")
 
@@ -301,7 +319,8 @@ def build(verbose: bool = True) -> dict:
 
 
 if __name__ == "__main__":
-    print(f"enriching {_db.dsn_label()} ...")
+    print(f"enriching {_db.source_label()} -> {_db.dsn_label()}"
+          + (f"  (since {os.environ['ENRICH_SINCE']})" if os.environ.get("ENRICH_SINCE") else "") + " ...")
     s = build()
     for k, v in s.items():
         print(f"  {k:<18} {v:>10,}")
