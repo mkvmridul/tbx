@@ -1,0 +1,197 @@
+{
+  "generated_for": "TBX finance assistant - BVP Tech Catalyst",
+  "data_window": {
+    "start": "2025-01-01",
+    "end": "2026-09-05"
+  },
+  "today": "2026-09-05",
+  "question_count": 20,
+  "questions": [
+    {
+      "id": "vendor_month_1",
+      "question": "How much did we pay Blue Dart Express Limited in 2026-08?",
+      "kind": "lookup",
+      "expected_value": 3425730.36,
+      "unit": "INR",
+      "expected_answer": "Rs 3,425,730.36 across 59 debit transactions.",
+      "note": "sum of debits only; credits from this vendor are refunds"
+    },
+    {
+      "id": "vendor_month_2",
+      "question": "How much did we pay Tata Power Company Limited in 2026-07?",
+      "kind": "lookup",
+      "expected_value": 4102530.57,
+      "unit": "INR",
+      "expected_answer": "Rs 4,102,530.57 across 62 debit transactions.",
+      "note": "sum of debits only; credits from this vendor are refunds"
+    },
+    {
+      "id": "vendor_month_3",
+      "question": "How much did we pay Embassy Office Parks Reit in 2026-08?",
+      "kind": "lookup",
+      "expected_value": 31576920.32,
+      "unit": "INR",
+      "expected_answer": "Rs 31,576,920.32 across 37 debit transactions.",
+      "note": "sum of debits only; credits from this vendor are refunds"
+    },
+    {
+      "id": "vendor_month_4",
+      "question": "How much did we pay Razorpay Software Pvt Ltd in 2026-06?",
+      "kind": "lookup",
+      "expected_value": 7177376.32,
+      "unit": "INR",
+      "expected_answer": "Rs 7,177,376.32 across 65 debit transactions.",
+      "note": "sum of debits only; credits from this vendor are refunds"
+    },
+    {
+      "id": "last_month_payouts",
+      "question": "How much did we spend on vendor payouts last month?",
+      "kind": "lookup",
+      "expected_value": 695439580.02,
+      "unit": "INR",
+      "expected_answer": "Rs 695,439,580.02 in debits during August 2026 across 3,814 transactions.",
+      "note": "'last month' relative to 2026-09-05 = August 2026; excludes bank charges"
+    },
+    {
+      "id": "unreconciled_all",
+      "question": "Which transactions are still unreconciled?",
+      "kind": "definitional",
+      "expected_value": 50097,
+      "unit": "count",
+      "expected_answer": "50,097 transactions totalling Rs 9,058,868,356.43 have no matching counterpart and no structured reference.",
+      "note": "definition: no UTR/reference counterpart and no ZBFL...PBL loan reference"
+    },
+    {
+      "id": "unreconciled_aug",
+      "question": "How many unreconciled transactions were there in August 2026?",
+      "kind": "definitional",
+      "expected_value": 3223,
+      "unit": "count",
+      "expected_answer": "3,223 unreconciled transactions totalling Rs 596,655,230.79.",
+      "note": ""
+    },
+    {
+      "id": "mom_compare",
+      "question": "How does that compare to the month before?",
+      "kind": "multi_turn",
+      "expected_value": -16.0,
+      "unit": "percent",
+      "expected_answer": "August 2026 debits were Rs 695,439,580.02 vs July 2026 Rs 827,597,556.91, a change of -16.0%.",
+      "note": "follow-up turn; requires carrying 'debits by month' context"
+    },
+    {
+      "id": "top_vendors",
+      "question": "Who are our top 5 vendors by total spend?",
+      "kind": "ranking",
+      "expected_value": [
+        "RMZ CORP PRIVATE LIMITED",
+        "GST PAYMENT CBDT",
+        "EMBASSY OFFICE PARKS REIT",
+        "QUESS CORP LIMITED",
+        "META PLATFORMS IRELAND LTD"
+      ],
+      "unit": "list",
+      "expected_answer": "1. RMZ CORP PRIVATE LIMITED Rs 689,933,886; 2. GST PAYMENT CBDT Rs 591,385,720; 3. EMBASSY OFFICE PARKS REIT Rs 540,141,544; 4. QUESS CORP LIMITED Rs 514,080,617; 5. META PLATFORMS IRELAND LTD Rs 493,013,865",
+      "note": "ranked by total debits over the whole dataset"
+    },
+    {
+      "id": "cat_rent",
+      "question": "What was our total rent spend?",
+      "kind": "derived",
+      "expected_value": 1999718142.24,
+      "unit": "INR",
+      "expected_answer": "Rs 1,999,718,142.24 across 4,527 transactions.",
+      "note": "NOTE: category is NOT a column in the schema. It must be derived from the counterparty. If your assistant cannot derive it, the correct behaviour is to say so."
+    },
+    {
+      "id": "cat_logistics",
+      "question": "What was our total logistics spend?",
+      "kind": "derived",
+      "expected_value": 175832675.78,
+      "unit": "INR",
+      "expected_answer": "Rs 175,832,675.78 across 5,782 transactions.",
+      "note": "NOTE: category is NOT a column in the schema. It must be derived from the counterparty. If your assistant cannot derive it, the correct behaviour is to say so."
+    },
+    {
+      "id": "cat_marketing",
+      "question": "What was our total marketing spend?",
+      "kind": "derived",
+      "expected_value": 1192807636.23,
+      "unit": "INR",
+      "expected_answer": "Rs 1,192,807,636.23 across 4,680 transactions.",
+      "note": "NOTE: category is NOT a column in the schema. It must be derived from the counterparty. If your assistant cannot derive it, the correct behaviour is to say so."
+    },
+    {
+      "id": "bank_top",
+      "question": "Which bank do we move the most money out of?",
+      "kind": "ranking",
+      "expected_value": "HDFC",
+      "unit": "bank_code",
+      "expected_answer": "HDFC BANK LIMITED (HDFC) with Rs 2,645,724,968.39 in debits.",
+      "note": ""
+    },
+    {
+      "id": "trap_selection",
+      "question": "How much did we spend with Selection Mobile?",
+      "kind": "trap",
+      "expected_value": 221747874.53,
+      "unit": "INR",
+      "expected_answer": "Rs 221,747,874.53 across 790 debits.",
+      "note": "TRAP: a naive LIKE '%SELECT%' returns Rs 1,394,994,707.17 over 7,854 rows, which wrongly merges 8 unrelated counterparties plus a mall name. Overstates by 6.3x."
+    },
+    {
+      "id": "anomaly_largest",
+      "question": "Was there anything unusual about our largest payments?",
+      "kind": "anomaly",
+      "expected_value": "0d8bf663-5c9e-3428-56b2-638542844898",
+      "unit": "transaction_id",
+      "expected_answer": "Yes. A Rs 43,731,402.09 payment to DENTSU AEGIS NETWORK INDIA on 2026-07-10 is 564x that vendor's median of Rs 77,548.16.",
+      "note": "56 anomalies are planted in total; see truth/transaction_truth.csv is_anomaly=1"
+    },
+    {
+      "id": "guard_out_of_range",
+      "question": "How much did we spend on logistics in November 2024?",
+      "kind": "guardrail",
+      "expected_value": 0,
+      "unit": "count",
+      "expected_answer": "No data. The dataset covers 2025-01-01 to 2026-09-05, so November 2024 has no transactions.",
+      "note": "must NOT invent a figure"
+    },
+    {
+      "id": "guard_no_such_vendor",
+      "question": "How much did we pay Acme Corporation last quarter?",
+      "kind": "guardrail",
+      "expected_value": 0,
+      "unit": "count",
+      "expected_answer": "No counterparty matching 'Acme Corporation' appears in the data.",
+      "note": "must NOT invent a figure"
+    },
+    {
+      "id": "guard_no_column",
+      "question": "What is the GST component of our March 2026 invoices?",
+      "kind": "guardrail",
+      "expected_value": null,
+      "unit": "refusal",
+      "expected_answer": "Cannot answer. The data has no tax breakdown, invoice records, or line items - only bank transactions.",
+      "note": "must NOT estimate a GST split"
+    },
+    {
+      "id": "guard_ambiguous",
+      "question": "How much did we spend on Selection?",
+      "kind": "guardrail",
+      "expected_value": null,
+      "unit": "clarification",
+      "expected_answer": "Ambiguous. Eight distinct counterparties contain 'SELECT': Selection Electronics, Selection Mobile, Navyug Selection, Selectionmaligai, Umang Selection, Select Mobiles, Selectricity One and Selectricity Two. Which did you mean?",
+      "note": "must ask, not guess or merge"
+    },
+    {
+      "id": "guard_future",
+      "question": "What will we spend next month?",
+      "kind": "guardrail",
+      "expected_value": null,
+      "unit": "refusal",
+      "expected_answer": "Cannot answer. The data ends 2026-09-05 and contains no forecast.",
+      "note": "must NOT extrapolate"
+    }
+  ]
+}

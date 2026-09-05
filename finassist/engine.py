@@ -1,0 +1,270 @@
+"""finassist/engine.py — question in, grounded answer out.
+
+    engine = Engine("data/finance.sqlite")
+    ans = engine.ask("How much did we pay Blue Dart last month?")
+
+The pipeline, in order. Every step before narration is deterministic:
+
+    1 PLAN      rules first, model only when the rules are unsure   (finassist.plan)
+    2 RESOLVE   period and counterparty, in code                    (finassist.resolve)
+    3 GUARD     refuse / ask, before any number is produced         (this file)
+    4 COMPUTE   parameterised SQL, evidence recorded                (finassist.intents)
+    5 NARRATE   model writes prose, validator rejects invented numbers (finassist.narrate)
+
+Guards run BEFORE compute, not after. An assistant that computes first and checks later has
+already decided what the answer is, and the check becomes a formality.
+"""
+from __future__ import annotations
+
+import sqlite3
+import time
+from dataclasses import dataclass, field, asdict
+
+from finassist import plan as planner
+from finassist.intents import REGISTRY, Ctx, Result
+from finassist.narrate import narrate, demo_fabrication
+from finassist.resolve import (Period, anchor, coverage, previous_period,
+                               resolve_counterparty, resolve_period)
+
+
+@dataclass
+class Answer:
+    question: str
+    status: str = "ok"                 # ok | refused | clarify | empty
+    answer: str = ""
+    intent: str = ""
+    headline: dict | None = None
+    evidence: list[dict] = field(default_factory=list)
+    columns: list[str] = field(default_factory=list)
+    rows: list[tuple] = field(default_factory=list)
+    period: dict | None = None
+    counterparty: dict | None = None
+    candidates: list[dict] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+    source: str = ""
+    model: str = ""
+    citations: list[str] = field(default_factory=list)
+    plan_source: str = ""
+    llm_calls: int = 0
+    elapsed_ms: int = 0
+
+    def as_dict(self) -> dict:
+        return asdict(self)
+
+
+class Session:
+    """What the assistant is allowed to remember between turns.
+
+    Only three things carry over: the last counterparty, the last period and the last
+    intent. Nothing else, and no free-text history is replayed into the compute path, so a
+    follow-up can change WHICH rows are selected but can never change what a number means.
+    """
+
+    def __init__(self):
+        self.counterparty: dict | None = None
+        self.period: Period | None = None
+        self.intent: str | None = None
+        self.history: list[str] = []
+
+    def remember(self, q: str, a: Answer, period: Period | None, cp: dict | None):
+        self.history.append(f"user: {q}")
+        if a.answer:
+            self.history.append(f"assistant: {a.answer[:200]}")
+        if period:
+            self.period = period
+        if cp:
+            self.counterparty = cp
+        if a.intent and a.status == "ok":
+            self.intent = a.intent
+        self.history = self.history[-12:]
+
+
+class Engine:
+    def __init__(self, db_path: str = "data/finance.sqlite", cfg: dict | None = None,
+                 use_llm: bool = True):
+        self.db_path = db_path
+        self.cfg = cfg or {}
+        self.use_llm = use_llm
+        self.cx = sqlite3.connect(db_path, check_same_thread=False)
+        self.cx.row_factory = sqlite3.Row
+        self._check_enriched()
+        self.today = anchor(self.cx)
+        self.cov_start, self.cov_end = coverage(self.cx)
+
+    def _check_enriched(self):
+        t = {r[0] for r in self.cx.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        missing = {"transaction_enriched", "counterparty"} - t
+        if missing:
+            raise RuntimeError(
+                f"{self.db_path} is missing {', '.join(sorted(missing))}. "
+                f"Run:  python -m finassist.enrich {self.db_path}")
+
+    # ---------------------------------------------------------------- guards
+
+    def _out_of_range(self, p: Period) -> bool:
+        return p.end < self.cov_start or p.start > self.cov_end
+
+    def _refuse(self, q: str, text: str, intent: str = "unsupported", **kw) -> Answer:
+        return Answer(question=q, status="refused", answer=text, intent=intent,
+                      source="deterministic", model="guardrail", **kw)
+
+    # ---------------------------------------------------------------- ask
+
+    def ask(self, question: str, session: Session | None = None) -> Answer:
+        t0 = time.perf_counter()
+        session = session or Session()
+        llm_calls = 0
+
+        p = planner.make_plan(question, session.history, self.cfg, use_llm=self.use_llm)
+        if p.source == "llm":
+            llm_calls += 1
+
+        # --- follow-up: inherit last turn's subject ---------------------------
+        if p.intent == "follow_up":
+            p = planner.Plan(session.intent or "spend_total", {}, "inherited")
+        elif p.confidence == "low" and session.intent and p.source == "rules":
+            # The rules recognised no intent and were about to fall back to a whole-company
+            # total. Mid-conversation that is the wrong default: "How many were there in
+            # August?" after a reconciliation question is still about reconciliation.
+            # Continuing the previous intent is recoverable -- the intent chip shows what was
+            # answered -- whereas silently switching topic is not.
+            p = planner.Plan(session.intent, p.slots, "inherited", vendor_text=p.vendor_text)
+
+        # --- guard: the data cannot answer this at all -----------------------
+        if p.intent == "unsupported":
+            a = self._refuse(question, p.reason or "The data cannot answer that.")
+            a.plan_source, a.llm_calls = p.source, llm_calls
+            a.elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            session.remember(question, a, None, None)
+            return a
+
+        # --- resolve the period ----------------------------------------------
+        period = resolve_period(p.slots.get("period_text") or question, self.today)
+        if period is None and p.intent in ("compare_periods",):
+            period = session.period or resolve_period("last month", self.today)
+        if period is None and session.period and _is_follow_up(question):
+            period = session.period
+        if p.intent == "spend_trend" and not resolve_period(p.slots.get("period_text") or question, self.today):
+            # "show me that by month" asks to widen the view, not to keep the single month
+            # the previous turn was scoped to. A one-month trend line is not a trend.
+            period = None
+
+        if period and self._out_of_range(period):
+            a = self._refuse(
+                question,
+                f"No data for {period.label}. This dataset covers {self.cov_start} to "
+                f"{self.cov_end}, so there are no transactions in that period.",
+                intent=p.intent)
+            a.period = period.as_dict()
+            a.plan_source, a.llm_calls = p.source, llm_calls
+            a.elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            session.remember(question, a, None, None)
+            return a
+
+        # --- resolve the counterparty ----------------------------------------
+        cp = None
+        if p.vendor_text:
+            res = resolve_counterparty(self.cx, p.vendor_text)
+            if res.ambiguous:
+                names = [c["canonical_name"] for c in res.candidates]
+                a = Answer(question=question, status="clarify", intent=p.intent,
+                           candidates=[dict(c) for c in res.candidates],
+                           source="deterministic", model="guardrail",
+                           answer=(f"“{p.vendor_text}” matches {len(names)} different "
+                                   f"counterparties in the data: " + ", ".join(names) +
+                                   ". Which one did you mean?"))
+                a.plan_source, a.llm_calls = p.source, llm_calls
+                a.elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                session.remember(question, a, period, None)
+                return a
+            if res.missing:
+                a = self._refuse(
+                    question,
+                    f"No counterparty matching “{p.vendor_text}” appears in the data.",
+                    intent=p.intent)
+                a.plan_source, a.llm_calls = p.source, llm_calls
+                a.elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                session.remember(question, a, period, None)
+                return a
+            cp = dict(res.value)
+        elif p.intent in ("spend_by_counterparty", "counterparty_profile"):
+            cp = session.counterparty          # a follow-up about the same vendor
+        elif (p.intent in ("compare_periods", "spend_trend", "anomalies")
+              and session.counterparty and _is_follow_up(question)):
+            # "How does that compare to the month before?" right after a question about one
+            # vendor is still about that vendor. Without this the assistant silently answers
+            # about total company spend instead, using the same words, and the user has no
+            # way to tell the subject changed.
+            cp = session.counterparty
+
+        # --- guard: required slot still missing ------------------------------
+        if err := planner.validate(p, {"counterparty": cp, "period": period}):
+            a = self._refuse(question,
+                             f"I need a bit more to answer that: {err.replace('_', ' ')}.",
+                             intent=p.intent)
+            a.plan_source, a.llm_calls = p.source, llm_calls
+            a.elapsed_ms = int((time.perf_counter() - t0) * 1000)
+            session.remember(question, a, period, cp)
+            return a
+
+        # --- compute ----------------------------------------------------------
+        kwargs = {k: v for k, v in p.slots.items() if k != "period_text"}
+        kwargs["period"] = period
+        if cp:
+            kwargs["counterparty"] = cp
+        if p.intent == "compare_periods":
+            kwargs["prior"] = previous_period(period)
+
+        result: Result = REGISTRY[p.intent](Ctx(self.cx), **kwargs)
+
+        # --- narrate ----------------------------------------------------------
+        out = narrate(result, self.cfg, question)
+        if out["source"].startswith("llm"):
+            llm_calls += 1
+
+        a = Answer(
+            question=question,
+            status="empty" if result.status == "empty" else "ok",
+            answer=out["answer"], intent=result.intent, headline=result.headline,
+            evidence=[e.as_dict() for e in result.evidence],
+            columns=result.columns, rows=result.rows,
+            period=result.period, counterparty=cp, notes=result.notes,
+            source=out["source"], model=out["model"], citations=out["citations"],
+            plan_source=p.source, llm_calls=llm_calls,
+            elapsed_ms=int((time.perf_counter() - t0) * 1000))
+        session.remember(question, a, period, cp)
+        return a
+
+    # ------------------------------------------------------------ judge demo
+
+    def fabrication_demo(self, question: str = "How much did we spend last month?") -> Answer:
+        """Run the validator against a deliberately doctored answer, offline."""
+        period = resolve_period(question, self.today) or resolve_period("last month", self.today)
+        result = REGISTRY["spend_total"](Ctx(self.cx), period=period)
+        out = demo_fabrication(result, question)
+        return Answer(question=question, status="ok", answer=out["answer"],
+                      intent="fabrication_demo", headline=result.headline,
+                      evidence=[e.as_dict() for e in result.evidence],
+                      columns=result.columns, rows=result.rows, period=result.period,
+                      source=out["source"], model=out["model"], citations=out["citations"])
+
+    def stats(self) -> dict:
+        q = lambda s: self.cx.execute(s).fetchone()[0]
+        return {
+            "database": self.db_path,
+            "transactions": q("SELECT COUNT(*) FROM transaction_enriched"),
+            "counterparties": q("SELECT COUNT(*) FROM counterparty"),
+            "accounts": q("SELECT COUNT(*) FROM account"),
+            "coverage_start": self.cov_start,
+            "coverage_end": self.cov_end,
+            "data_clock": self.today.isoformat(),
+            "unmatched": q("SELECT COUNT(*) FROM transaction_enriched WHERE recon_status='unmatched'"),
+            "intents": sorted(REGISTRY),
+        }
+
+
+def _is_follow_up(q: str) -> bool:
+    ql = (q or "").lower()
+    return len(ql.split()) <= 9 and any(
+        w in ql for w in ("that", "it", "them", "those", "same", "and ", "what about"))

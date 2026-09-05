@@ -1,0 +1,6 @@
+# The engine, the guardrails, the API, the UI and the CSV export need NOTHING here.
+# Everything in finassist/, api/ and tests/ is Python standard library.
+#
+# Install this only if you want the language model to rewrite the prose. The numbers are
+# identical either way, because they come from SQL.
+openai>=1.40

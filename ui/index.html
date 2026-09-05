@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>finassist — TBX finance assistant</title>
+<style>
+:root{
+  --bg:#f6f7f8; --panel:#ffffff; --ink:#111820; --muted:#5b6875; --line:#dfe4e9;
+  --accent:#0a6e78; --accent-soft:#e6f2f3; --ok:#137a43; --warn:#a8690a; --stop:#b3283c;
+  --code:#f2f4f6; --shadow:0 1px 2px rgba(16,24,32,.06),0 4px 16px rgba(16,24,32,.05);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0e1418; --panel:#151d23; --ink:#e7edf1; --muted:#93a2ad; --line:#243039;
+  --accent:#4fc3cf; --accent-soft:#123034; --ok:#4ec98a; --warn:#e0a83c; --stop:#f0798c;
+  --code:#0b1216; --shadow:0 1px 2px rgba(0,0,0,.4),0 4px 16px rgba(0,0,0,.3);
+}}
+:root[data-theme="dark"]{
+  --bg:#0e1418; --panel:#151d23; --ink:#e7edf1; --muted:#93a2ad; --line:#243039;
+  --accent:#4fc3cf; --accent-soft:#123034; --ok:#4ec98a; --warn:#e0a83c; --stop:#f0798c;
+  --code:#0b1216; --shadow:0 1px 2px rgba(0,0,0,.4),0 4px 16px rgba(0,0,0,.3);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif}
+.wrap{max-width:940px;margin:0 auto;padding:0 20px 140px}
+header{position:sticky;top:0;z-index:20;background:var(--bg);border-bottom:1px solid var(--line);
+  padding:14px 0 12px;margin-bottom:22px}
+.hrow{max-width:940px;margin:0 auto;padding:0 20px;display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+h1{font-size:17px;margin:0;letter-spacing:-.2px}
+h1 span{color:var(--accent)}
+.meta{color:var(--muted);font-size:12.5px;font-variant-numeric:tabular-nums}
+.meta b{color:var(--ink);font-weight:600}
+.pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;
+  letter-spacing:.3px;text-transform:uppercase;border:1px solid}
+.p-ok{color:var(--ok);border-color:var(--ok);background:transparent}
+.p-warn{color:var(--warn);border-color:var(--warn)}
+.p-stop{color:var(--stop);border-color:var(--stop)}
+.p-mute{color:var(--muted);border-color:var(--line)}
+.presets{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 20px}
+.presets button{background:var(--panel);border:1px solid var(--line);color:var(--muted);
+  padding:6px 11px;border-radius:999px;font-size:12.5px;cursor:pointer;transition:.12s}
+.presets button:hover{border-color:var(--accent);color:var(--accent)}
+.presets button.danger{border-color:var(--stop);color:var(--stop)}
+.turn{margin-bottom:22px}
+.q{font-weight:600;margin-bottom:9px;display:flex;gap:9px;align-items:flex-start}
+.q::before{content:"›";color:var(--accent);font-weight:700}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+  padding:16px 18px;box-shadow:var(--shadow)}
+.card.refused{border-left:3px solid var(--stop)}
+.card.clarify{border-left:3px solid var(--warn)}
+.card.ok{border-left:3px solid var(--ok)}
+.answer{white-space:pre-wrap;margin:0 0 12px;font-size:15.5px}
+.badges{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.headline{display:flex;align-items:baseline;gap:10px;padding:11px 13px;background:var(--accent-soft);
+  border-radius:8px;margin-bottom:13px;flex-wrap:wrap}
+.headline .v{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.4px}
+.headline .l{color:var(--muted);font-size:13px}
+details{margin-top:11px;border-top:1px solid var(--line);padding-top:11px}
+summary{cursor:pointer;font-size:13px;color:var(--muted);font-weight:600;user-select:none}
+summary:hover{color:var(--accent)}
+table{width:100%;border-collapse:collapse;font-size:13px;margin-top:9px;
+  font-variant-numeric:tabular-nums}
+th{text-align:left;color:var(--muted);font-weight:600;font-size:11.5px;text-transform:uppercase;
+  letter-spacing:.4px;padding:6px 9px;border-bottom:1px solid var(--line)}
+td{padding:6px 9px;border-bottom:1px solid var(--line)}
+td.num{text-align:right}
+.scroll{overflow-x:auto;max-height:340px;overflow-y:auto;border:1px solid var(--line);
+  border-radius:8px;margin-top:9px}
+.scroll table{margin:0}
+.scroll th{position:sticky;top:0;background:var(--panel)}
+.ev{margin-top:9px}
+.ev-row{display:grid;grid-template-columns:56px 1fr auto;gap:10px;padding:7px 0;
+  border-bottom:1px solid var(--line);align-items:baseline;font-size:13px}
+.ev-row:last-child{border-bottom:0}
+.ev-id{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:var(--accent);font-weight:600}
+.ev-v{font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+pre{background:var(--code);border:1px solid var(--line);border-radius:7px;padding:10px 12px;
+  overflow-x:auto;font-size:12px;line-height:1.5;margin:7px 0 0;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.note{font-size:12.5px;color:var(--muted);border-left:2px solid var(--line);padding-left:10px;margin-top:9px}
+.chips{display:flex;gap:7px;flex-wrap:wrap;margin-top:11px}
+.chips button{background:transparent;border:1px solid var(--warn);color:var(--warn);
+  padding:5px 11px;border-radius:999px;font-size:12.5px;cursor:pointer}
+.chips button:hover{background:var(--warn);color:var(--panel)}
+.act{display:flex;gap:9px;margin-top:12px;flex-wrap:wrap}
+.act a,.act button{font-size:12.5px;color:var(--accent);background:transparent;
+  border:1px solid var(--line);padding:5px 11px;border-radius:7px;cursor:pointer;text-decoration:none}
+.act a:hover,.act button:hover{border-color:var(--accent)}
+footer{position:fixed;left:0;right:0;bottom:0;background:var(--bg);border-top:1px solid var(--line);padding:13px 0}
+.frow{max-width:940px;margin:0 auto;padding:0 20px;display:flex;gap:9px}
+input[type=text]{flex:1;background:var(--panel);border:1px solid var(--line);color:var(--ink);
+  padding:11px 14px;border-radius:9px;font-size:15px;font-family:inherit}
+input[type=text]:focus{outline:none;border-color:var(--accent)}
+.send{background:var(--accent);color:#fff;border:0;padding:11px 20px;border-radius:9px;
+  font-size:14px;font-weight:600;cursor:pointer}
+.send:disabled{opacity:.5;cursor:default}
+.think{color:var(--muted);font-size:13.5px;padding:12px 0}
+.err{color:var(--stop);font-size:13.5px}
+</style>
+</head>
+<body>
+<header><div class="hrow">
+  <h1>fin<span>assist</span></h1>
+  <div class="meta" id="stats">connecting…</div>
+</div></header>
+
+<div class="wrap">
+  <div class="presets" id="presets"></div>
+  <div id="log"></div>
+</div>
+
+<footer><div class="frow">
+  <input type="text" id="q" placeholder="Ask about spend, vendors, or reconciliation…" autocomplete="off">
+  <button class="send" id="send">Ask</button>
+</div></footer>
+
+<script>
+const SID = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()));
+const log = document.getElementById('log');
+const qEl = document.getElementById('q');
+const sendEl = document.getElementById('send');
+
+const PRESETS = [
+  "How much did we spend on vendor payouts last month?",
+  "How does that compare to the month before?",
+  "Which transactions are still unreconciled?",
+  "How much did we pay Blue Dart in August 2026?",
+  "Who are our top 5 vendors by total spend?",
+  "How much did we spend on Selection?",
+  "What is the GST component of our March 2026 invoices?",
+];
+
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const isNum = v => typeof v === 'number' || (typeof v === 'string' && /^-?[\d,]+(\.\d+)?$/.test(v));
+const fmt = (v, unit) => {
+  if (v === null || v === undefined) return '—';
+  if (unit === 'INR')     return 'Rs ' + Number(v).toLocaleString('en-IN', {minimumFractionDigits:2, maximumFractionDigits:2});
+  if (unit === 'count')   return Number(v).toLocaleString('en-IN');
+  if (unit === 'percent') return (Number(v) > 0 ? '+' : '') + Number(v).toFixed(1) + '%';
+  return esc(v);
+};
+
+fetch('/stats').then(r => r.json()).then(s => {
+  document.getElementById('stats').innerHTML =
+    `<b>${s.transactions.toLocaleString('en-IN')}</b> transactions · ` +
+    `<b>${s.counterparties}</b> counterparties · data covers ` +
+    `<b>${s.coverage_start}</b> to <b>${s.coverage_end}</b> · ` +
+    `"today" = <b>${s.data_clock}</b>`;
+}).catch(() => document.getElementById('stats').textContent = 'stats unavailable');
+
+const pc = document.getElementById('presets');
+PRESETS.forEach(p => {
+  const b = document.createElement('button');
+  b.textContent = p.length > 46 ? p.slice(0, 44) + '…' : p;
+  b.title = p;
+  b.onclick = () => ask(p);
+  pc.appendChild(b);
+});
+const fab = document.createElement('button');
+fab.textContent = '⛔ Try to make it fabricate a number';
+fab.className = 'danger';
+fab.onclick = fabricationDemo;
+pc.appendChild(fab);
+
+function sourceBadge(a) {
+  if (a.status === 'refused') return '<span class="pill p-stop">guardrail · refused</span>';
+  if (a.status === 'clarify') return '<span class="pill p-warn">guardrail · needs clarification</span>';
+  if (a.source === 'llm+validator') return '<span class="pill p-ok">llm + numeric validator</span>';
+  if (a.source && a.source.includes('rejected')) return '<span class="pill p-stop">llm output rejected · deterministic</span>';
+  return '<span class="pill p-ok">computed · deterministic</span>';
+}
+
+function renderTable(cols, rows, cap) {
+  if (!rows || !rows.length) return '';
+  const head = cols.map(c => `<th>${esc(c)}</th>`).join('');
+  const body = rows.slice(0, cap).map(r =>
+    '<tr>' + r.map(v => `<td class="${isNum(v) ? 'num' : ''}">${
+      typeof v === 'number' ? v.toLocaleString('en-IN', {maximumFractionDigits:2}) : esc(v)}</td>`).join('') + '</tr>'
+  ).join('');
+  const more = rows.length > cap ? `<div class="note">Showing ${cap} of ${rows.length.toLocaleString('en-IN')} rows. Export the CSV for all of them.</div>` : '';
+  return `<div class="scroll"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>${more}`;
+}
+
+function renderEvidence(ev) {
+  if (!ev || !ev.length) return '';
+  const rows = ev.map(e => `
+    <div class="ev-row">
+      <span class="ev-id">${esc(e.id)}</span>
+      <span>${esc(e.label)}</span>
+      <span class="ev-v">${fmt(e.value, e.unit)}</span>
+    </div>
+    ${e.sql && !e.sql.startsWith('--') ? `<pre>${esc(e.sql.trim())}${
+      e.params && e.params.length ? '\n-- params: ' + esc(JSON.stringify(e.params)) : ''}</pre>` : ''}`).join('');
+  return `<details><summary>Evidence ledger — ${ev.length} value${ev.length>1?'s':''}, each from one SQL query</summary><div class="ev">${rows}</div></details>`;
+}
+
+function render(a) {
+  const t = document.createElement('div');
+  t.className = 'turn';
+  const cls = a.status === 'refused' ? 'refused' : a.status === 'clarify' ? 'clarify' : 'ok';
+
+  let chips = '';
+  if (a.candidates && a.candidates.length) {
+    chips = '<div class="chips">' + a.candidates.map(c =>
+      `<button onclick="ask('How much did we pay ${esc(c.canonical_name).replace(/'/g,"\\'")} ${
+        a.period ? 'in ' + esc(a.period.label) : ''}?')">${esc(c.canonical_name)}</button>`).join('') + '</div>';
+  }
+
+  let head = '';
+  if (a.headline && a.status === 'ok') {
+    head = `<div class="headline"><span class="v">${fmt(a.headline.value, a.headline.unit)}</span>
+            <span class="l">${esc(a.headline.label)}${a.period ? ' · ' + esc(a.period.label) : ''}
+            ${a.headline.evidence_id ? ' · ' + esc(a.headline.evidence_id) : ''}</span></div>`;
+  }
+
+  const notes = (a.notes || []).map(n => `<div class="note">${esc(n)}</div>`).join('');
+  const act = a.exportable
+    ? `<div class="act"><a href="/export.csv?session_id=${SID}&turn=${a.turn}" download>Export breakdown (CSV)</a>
+       <span class="pill p-mute">${esc(a.intent)}</span>
+       <span class="pill p-mute">${a.elapsed_ms} ms</span>
+       <span class="pill p-mute">${a.llm_calls} llm call${a.llm_calls===1?'':'s'}</span></div>`
+    : `<div class="act"><span class="pill p-mute">${esc(a.intent)}</span>
+       <span class="pill p-mute">${a.elapsed_ms} ms</span>
+       <span class="pill p-mute">${a.llm_calls} llm call${a.llm_calls===1?'':'s'}</span></div>`;
+
+  t.innerHTML = `<div class="q">${esc(a.question)}</div>
+    <div class="card ${cls}">
+      <div class="badges">${sourceBadge(a)}</div>
+      <p class="answer">${esc(a.answer)}</p>
+      ${head}${chips}${notes}
+      ${renderTable(a.columns, a.rows, 60)}
+      ${renderEvidence(a.evidence)}
+      ${act}
+    </div>`;
+  log.appendChild(t);
+  t.scrollIntoView({behavior:'smooth', block:'start'});
+}
+
+function busy(on) { sendEl.disabled = on; sendEl.textContent = on ? '…' : 'Ask'; }
+
+async function ask(question) {
+  if (!question || !question.trim()) return;
+  qEl.value = '';
+  const think = document.createElement('div');
+  think.className = 'think';
+  think.textContent = '· computing…';
+  log.appendChild(think);
+  think.scrollIntoView({behavior:'smooth', block:'end'});
+  busy(true);
+  try {
+    const r = await fetch('/ask', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({question, session_id: SID})
+    });
+    const a = await r.json();
+    think.remove();
+    if (a.error) { const e = document.createElement('div'); e.className='err'; e.textContent = a.error; log.appendChild(e); }
+    else render(a);
+  } catch (e) {
+    think.remove();
+    const el = document.createElement('div'); el.className='err';
+    el.textContent = 'Request failed: ' + e.message; log.appendChild(el);
+  } finally { busy(false); }
+}
+
+async function fabricationDemo() {
+  busy(true);
+  try {
+    const r = await fetch('/demo/fabrication', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({question: 'How much did we spend last month?'})
+    });
+    const a = await r.json();
+    a.question = 'Demo: a draft answer with a number no query produced';
+    a.status = 'refused';
+    render(a);
+  } finally { busy(false); }
+}
+
+sendEl.onclick = () => ask(qEl.value);
+qEl.addEventListener('keydown', e => { if (e.key === 'Enter') ask(qEl.value); });
+qEl.focus();
+</script>
+</body>
+</html>

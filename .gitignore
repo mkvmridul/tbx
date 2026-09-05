@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+.env
+.venv/
+.DS_Store
+*.parquet
+
+# Generated data. `python generate_dataset.py` (seed 20260905) rebuilds all of this
+# byte-for-byte, so none of it belongs in git.
+data/*.sqlite
+data/*.csv
+data/seed_mysql.sql
+data/truth/transaction_truth.csv
+
+# Deliberately KEPT in git — small, and the graders and docs need them:
+#   data/truth/answer_key.json      (8 KB, read by tests/eval_answers.py)
+#   data/truth/counterparty.csv     (15 KB)
+#   data/truth/entity.csv           (3 KB)
+#   data/schema.sql  data/DATASET.md
