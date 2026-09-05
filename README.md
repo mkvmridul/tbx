@@ -213,3 +213,7 @@ The evidence-ledger and `{{ev_N}}` numeric-validator pattern is carried over fro
 *the engine computes, the model only narrates* — was used for ad-metrics root-cause analysis.
 It transfers to finance almost unchanged, and matters more here: a wrong number in a finance
 answer is a liability, not a cosmetic bug.
+
+Demo:
+[Demo_of_finassist.pptx](https://github.com/user-attachments/files/31864146/Demo_of_finassist.pptx)
+
